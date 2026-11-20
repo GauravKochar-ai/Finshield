@@ -1,54 +1,95 @@
 {
-  "_note": "Starting set ported from the boilerplate (backend/fs/regs.py). NOT VERIFIED. Arvind replaces each entry with text checked against the official source and sets verified=true. Only entries listed here may be cited by the AI.",
+  "_note": "Verified by M8 (Arvind) on 2026-11-20 against the official texts; details and verbatim checks in docs/regulations/. Only entries listed here may be cited by the AI. Keep regulation and clause strings in sync with docs/regulations/.",
   "refs": {
     "DPDP-SAFEGUARDS": {
       "regulation": "DPDP Act 2023 (DPDP-aligned readiness and controls)",
       "clause": "Sec 8(5)",
-      "summary": "Take reasonable security safeguards to prevent a personal data breach.",
-      "verified": false
+      "summary": "Protect personal data with reasonable security safeguards to prevent a personal data breach.",
+      "source_url": "https://www.meity.gov.in/static/uploads/2024/06/2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf",
+      "verified": true
     },
     "DPDP-BREACH": {
       "regulation": "DPDP Rules 2025 (DPDP-aligned readiness and controls)",
-      "clause": "Rule 7",
-      "summary": "Intimate the Data Protection Board and affected persons without delay; detailed report within 72 hours.",
-      "verified": false
+      "clause": "Rule 7(1), 7(2)",
+      "summary": "On becoming aware of a breach, inform affected persons and the Data Protection Board without delay, and send the Board a detailed report within 72 hours (Rule 7 in force from about May 2027).",
+      "source_url": "https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf",
+      "verified": true
     },
     "DPDP-PURPOSE": {
       "regulation": "DPDP Act 2023 (DPDP-aligned readiness and controls)",
-      "clause": "Sec 6-7",
-      "summary": "Process personal data only for the purpose the person consented to.",
-      "verified": false
+      "clause": "Sec 6(1)",
+      "summary": "Consent is for a specified purpose and limited to the data needed for it.",
+      "source_url": "https://www.meity.gov.in/static/uploads/2024/06/2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf",
+      "verified": true
     },
-    "RBI-CYBER": {
-      "regulation": "RBI IT governance and cyber security directions for NBFCs",
-      "clause": "Privileged access and incident reporting",
-      "summary": "Elevated access is supervised, logged and reviewed; MFA for privileged users; report cyber incidents to RBI within 6 hours.",
-      "verified": false
+    "RBI-CYBER-ACCESS": {
+      "regulation": "RBI (NBFCs - Cybersecurity, Technology: Risk, Resilience and Assurance Framework) Directions 2026",
+      "clause": "Paras 113-115",
+      "summary": "Grant access on business need; supervise, log and review elevated access; risk-based MFA for privileged users of critical systems.",
+      "source_url": "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=13592",
+      "verified": true
     },
-    "RBI-DL": {
-      "regulation": "RBI (Digital Lending) Directions 2025",
-      "clause": "Data use and disbursal",
-      "summary": "Need-based use of borrower data with consent and audit trail; disbursal only into the borrower's own bank account; lender stays responsible for its lending service providers.",
-      "verified": false
+    "RBI-CYBER-MONITOR": {
+      "regulation": "RBI (NBFCs - Cybersecurity, Technology: Risk, Resilience and Assurance Framework) Directions 2026",
+      "clause": "Paras 109-111",
+      "summary": "Keep audit trails and regularly monitor them and system logs to detect unauthorised activity.",
+      "source_url": "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=13592",
+      "verified": true
     },
-    "CERTIN": {
+    "RBI-CYBER-REPORT": {
+      "regulation": "RBI (NBFCs - Cybersecurity, Technology: Risk, Resilience and Assurance Framework) Directions 2026",
+      "clause": "Para 141",
+      "summary": "Report cyber incidents to RBI within six hours of detection on the DAKSH platform and notify CERT-In.",
+      "source_url": "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=13592",
+      "verified": true
+    },
+    "RBI-DL-DATA": {
+      "regulation": "RBI (NBFC - Credit Facilities) Directions 2025, Ch. III Digital Lending",
+      "clause": "Para 13(1)",
+      "summary": "Borrower data is collected only as needed, with prior explicit consent and an audit trail.",
+      "source_url": "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=12957",
+      "verified": true
+    },
+    "RBI-DL-LSP": {
+      "regulation": "RBI (NBFC - Credit Facilities) Directions 2025, Ch. III Digital Lending",
+      "clause": "Para 6(7)",
+      "summary": "The lender remains fully responsible for the acts and omissions of its lending service providers.",
+      "source_url": "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=12957",
+      "verified": true
+    },
+    "RBI-DL-DISBURSAL": {
+      "regulation": "RBI (NBFC - Credit Facilities) Directions 2025, Ch. III Digital Lending",
+      "clause": "Para 10(1)",
+      "summary": "Loans are disbursed into the borrower's own bank account, never to a third-party account, except narrow listed cases.",
+      "source_url": "https://www.rbi.org.in/Scripts/BS_ViewMasDirections.aspx?id=12957",
+      "verified": true
+    },
+    "CERTIN-REPORT": {
       "regulation": "CERT-In Directions, April 2022",
-      "clause": "Incident reporting and log retention",
-      "summary": "Report cyber incidents to CERT-In within 6 hours; keep ICT logs for 180 days in India.",
-      "verified": false
+      "clause": "Direction (ii)",
+      "summary": "Report cyber incidents listed in Annexure I, including data breach and data leak, to CERT-In within 6 hours of noticing them.",
+      "source_url": "https://www.cert-in.org.in/PDF/CERT-In_Directions_70B_28.04.2022.pdf",
+      "verified": true
+    },
+    "CERTIN-LOGS": {
+      "regulation": "CERT-In Directions, April 2022",
+      "clause": "Direction (iv)",
+      "summary": "Keep logs of all ICT systems securely for a rolling 180 days within India.",
+      "source_url": "https://www.cert-in.org.in/PDF/CERT-In_Directions_70B_28.04.2022.pdf",
+      "verified": true
     }
   },
   "by_signal": {
-    "S1": ["RBI-CYBER", "DPDP-SAFEGUARDS"],
-    "S2": ["RBI-CYBER", "DPDP-SAFEGUARDS"],
-    "S3": ["RBI-CYBER"],
-    "S4": ["DPDP-BREACH", "CERTIN", "RBI-DL"],
-    "S5": ["RBI-CYBER"],
-    "S6": ["RBI-CYBER"],
-    "S7": ["RBI-DL", "DPDP-SAFEGUARDS"],
-    "S8": ["RBI-CYBER", "CERTIN", "DPDP-SAFEGUARDS"],
-    "S9": ["DPDP-PURPOSE", "RBI-DL"],
-    "S10": ["RBI-DL", "RBI-CYBER"],
-    "S11": ["DPDP-SAFEGUARDS", "RBI-CYBER", "CERTIN"]
+    "S1": ["RBI-CYBER-MONITOR", "DPDP-SAFEGUARDS"],
+    "S2": ["RBI-CYBER-MONITOR", "DPDP-SAFEGUARDS"],
+    "S3": ["RBI-CYBER-ACCESS"],
+    "S4": ["DPDP-BREACH", "CERTIN-REPORT", "RBI-CYBER-REPORT"],
+    "S5": ["RBI-CYBER-ACCESS"],
+    "S6": ["RBI-CYBER-MONITOR"],
+    "S7": ["RBI-DL-LSP", "DPDP-SAFEGUARDS"],
+    "S8": ["CERTIN-LOGS", "RBI-CYBER-MONITOR", "CERTIN-REPORT"],
+    "S9": ["DPDP-PURPOSE", "RBI-DL-DATA"],
+    "S10": ["RBI-DL-DISBURSAL", "RBI-CYBER-ACCESS"],
+    "S11": ["DPDP-SAFEGUARDS", "CERTIN-REPORT"]
   }
 }

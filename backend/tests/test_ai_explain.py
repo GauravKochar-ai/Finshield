@@ -105,7 +105,11 @@ def test_bedrock_off_gives_valid_template(fn, monkeypatch):
     schema.validate("ai_explanation", ai)
     assert ai["numbers_used"]["score"] == 96 and ai["numbers_used"]["customers_affected"] == 198
     assert len(ai["summary"].split()) <= 80
-    assert all("pending verification" in r["why"] for r in ai["rules_affected"])
+    # Unverified clauses carry "(clause pending verification)"; verified ones must not.
+    verified = {(r["regulation"], r["clause"]): r.get("verified") for r in fn.REGS["refs"].values()}
+    assert ai["rules_affected"]
+    for r in ai["rules_affected"]:
+        assert ("pending verification" in r["why"]) != bool(verified[(r["regulation"], r["clause"])])
 
 
 def test_force_fallback_keeps_existing_ok_for_same_score(fn, monkeypatch):
