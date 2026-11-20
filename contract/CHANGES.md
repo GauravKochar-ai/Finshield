@@ -44,3 +44,29 @@
 - Alert status moves OPEN → CONTAINED (end of the containment branch) → AWAITING_APPROVAL (before the approval wait), set by the state machine with a conditional DynamoDB update; each change also emits `Incident Updated`.
 - `ai_explain` accepts `{"force_fallback": true}`. It rejects Bedrock output whose numbers are not computed facts or whose clauses are not in `backend/functions/ai_explain/regulations.json`. That file is the boilerplate's regulation list, NOT VERIFIED; fallback text marks each clause "pending verification" until Arvind replaces it.
 - `contain_bucket_deny` edits the KYC bucket policy at runtime; the next `sam deploy` resets it to the template (removes any deny).
+
+## CHANGE-7 (M3, aekanshu): windows added to config.json, version 1.1.0
+- `signals.S1.window_minutes = 15`, `signals.S2.window_hours = 24`, new `baselines` block (`lookback_days 30`,
+  `min_history_days 14`, `percentile 95`). They were fixed numbers in the playbook text; R2.1 says windows come only from config.
+- `contract/fixtures/api_rules.json` mirrors config.json and does not show these keys yet (owner of GET /rules to refresh).
+
+## OPEN-10 (M3): where the E2 overage +10 is shown
+- The alert schema only allows signal codes S1-S11, so there is no `E2X` signal. Detection adds the 10 overage points to the
+  S1 (or S2) signal and records `ticket_id`, `ticket_max_files`, `files_in_window`, `ticket_overage_points` in its facts.
+  SC-10 therefore shows S1 = 40 (30 + 10). Alternative: allow an `E2X` code in alert.schema.json. Decision needed (M3, M6).
+
+## OPEN-11 (M3): scope of S7 and the score of logged-only results
+- S7 applies only to users with `Users.access_scope = "ASSIGNED"` (agents, partner agents, marketing). Ops, KYC, auditors and
+  service accounts have `ALL`; otherwise SC-01 would also score S7.
+- Scores below 40 create no alert, so detection keeps the highest score per user in `Counters` (`<user_id>#score` / `max`)
+  for the accuracy runner. One open alert per user is enforced with a pointer item `Counters` (`<user_id>#alert` / `open`),
+  the daily alert number lives in `Counters` (`alert_seq` / `YYYYMMDD`).
+
+## CHANGE-8 (M3): template permissions
+- simulator: CRUD on Events (reset deletes replayed events). test_runner: read on Counters (logged-only scores).
+  baseline: Timeout 120 s. Makefile `layer` copies `simulator/scenarios` and `simulator/seed/generate.py` (as `finshield/seedgen.py`).
+
+## OPEN-12 (M3): real-mode role name
+- S3 matches `signals.S3.emergency_roles = ["KYC-Emergency"]`. The template has no role with that name; real mode via
+  CloudTrail needs either a role named KYC-Emergency or this list extended. TimeToDetectMs uses event ts, which the simulator
+  sets to the scenario clock time (can be hours ago); test_runner's time_to_alert_ms measures from send time instead.

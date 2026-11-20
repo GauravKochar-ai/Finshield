@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "timezone_offset": "+05:30",
   "score_cap": 100,
   "incident_window_minutes": 60,
@@ -29,6 +29,7 @@
     "S1": {
       "name": "Volume spike",
       "description": "15-min downloads divided by max(user p95, team p95, baseline_floor). PRESIGN over presign_count_threshold counts as downloads.",
+      "window_minutes": 15,
       "baseline_floor": 1,
       "presign_count_threshold": 50,
       "ratio_tiers": [
@@ -54,6 +55,7 @@
     "S2": {
       "name": "Slow leak",
       "description": "Daily downloads exceed multiple of daily average and minimum count; only applies if higher than S1.",
+      "window_hours": 24,
       "points": 25,
       "daily_multiple": 5,
       "min_daily_count": 200
@@ -151,5 +153,11 @@
       "description": "An approval created by the actor being scored is ignored.",
       "ignore_self_approval": true
     }
+  },
+  "baselines": {
+    "description": "Baselines Lambda: lookback over normal (non-replay) events; users with less history than min_history_days use their team baseline.",
+    "lookback_days": 30,
+    "min_history_days": 14,
+    "percentile": 95
   }
 }
