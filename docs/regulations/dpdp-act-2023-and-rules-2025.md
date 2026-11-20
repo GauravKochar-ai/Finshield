@@ -14,7 +14,7 @@ Checked against the official PDFs on 2026-11-20 by M8.
 | Commences | What | Date |
 |---|---|---|
 | On publication | Rules 1, 2, 17–21 (Board). Act s.1(2), s.2, ss.18–26, 35, 38–43, s.44(1),(3). | 13 Nov 2025 |
-| One year later | Rule 4 (Consent Manager registration). Act s.6(9), s.27(1)(d). | about 13 Nov 2026 |
+| One year later | Rule 4 (Consent Manager registration, a regulated role, not our consent ledger). Act s.6(9), s.27(1)(d). | about 13 Nov 2026 |
 | Eighteen months later | Rules 3, 5–16, 22, 23 (notice, **security safeguards r.6, breach intimation r.7, retention r.8**, contact r.9, SDF r.13). Act ss.3–17 including **all of s.8**, ss.28–34 (penalties). | about 13 May 2027 |
 
 The Gazette is dated 13 Nov 2025 but was uploaded on 14 Nov 2025, so give the derived dates as "about". **As of Nov 2026 the core obligations (s.8, Rules 6–7, penalties) are not yet in force.** That is why FinShield shows readiness timers, not legal deadlines.
