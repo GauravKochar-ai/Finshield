@@ -1621,11 +1621,18 @@ Resources:
         Version: '2012-10-17'
         Statement: [{ Effect: Allow, Principal: { Service: config.amazonaws.com }, Action: 'sts:AssumeRole' }]
       ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWS_ConfigRole']
-      Policies:
-        - PolicyName: deliver
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement: [{ Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${ConfigBucket.Arn}/*' }]
+  ConfigRoleDeliverPolicy:
+    # Separate resource on purpose: the delivery channel waits for it, which also gives the recorder (created as soon
+    # as ConfigRole exists) time to be put first. A channel needs an existing recorder; the recorder only finishes
+    # once a channel exists, so a DependsOn between those two deadlocks.
+    Type: AWS::IAM::Policy
+    Condition: CreateRecorder
+    Properties:
+      PolicyName: deliver
+      Roles: [!Ref ConfigRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${ConfigBucket.Arn}/*' }]
   ConfigRecorder:
     Type: AWS::Config::ConfigurationRecorder
     Condition: CreateRecorder
@@ -1638,7 +1645,9 @@ Resources:
   ConfigDeliveryChannel:
     Type: AWS::Config::DeliveryChannel
     Condition: CreateRecorder
-    DependsOn: ConfigRecorder
+    # Not DependsOn ConfigRecorder: the recorder handler retries StartConfigurationRecorder until this channel exists,
+    # so that DependsOn deadlocks (NoAvailableDeliveryChannelException, NotStabilized; seen live).
+    DependsOn: [ConfigRoleDeliverPolicy, ConfigBucketPolicy]
     Properties:
       S3BucketName: !Ref ConfigBucket
   ConfigRuleS3Public:
