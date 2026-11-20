@@ -1,0 +1,11 @@
+# Only 5 example images are committed. The full set comes from:
+#   python3 simulator/seed/make_kyc_docs.py
+/C-*/*
+!/C-10001/KYC-PAN-C-10001.png
+!/C-10002/KYC-PAN-C-10002.png
+!/C-10081/KYC-AADHAAR-C-10081.png
+!/C-10161/KYC-AADHAAR-C-10161.png
+!/C-10171/KYC-SELFIE-C-10171.png
+
+# leftover transfer file - safe to delete by hand
+/_to_delete/
