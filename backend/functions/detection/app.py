@@ -8,7 +8,8 @@ For each event:
   4. Below MEDIUM: no alert record (the score is kept in Counters <user>#score for the accuracy runner).
   5. Upsert the open alert (status not CLOSED, detected within incident_window_minutes): a pointer item
      Counters <user>#alert / open is claimed with a conditional put so parallel invocations never create two
-     alerts; the alert itself is created with attribute_not_exists and raised only with "score < :new".
+     alerts; the alert itself is created with attribute_not_exists and raised only with "score < :new"
+     (or the same score over a larger event window, so facts end up complete when events arrive in parallel).
   6. Emit Alert Raised only when severity goes up. Publish FinShield/TimeToDetectMs (EMF log line).
 """
 from __future__ import annotations
@@ -212,17 +213,19 @@ def raise_alert(alert_id, res):
         if time.time() > deadline:
             raise RuntimeError(f"alert {alert_id} row not written by the creating invocation")
         time.sleep(0.1)
-    if cur["score"] >= res["score"]:
-        return None, None
+    n_new = len(_alert_fields(res)["event_ids"])
+    if cur["score"] > res["score"] or (cur["score"] == res["score"] and len(cur.get("event_ids", [])) >= n_new):
+        return None, None  # same score with a smaller or equal window: keep the stored facts
     new = {**cur, **_alert_fields(res)}
     schema.validate("alert", new)
     f = _alert_fields(res)
     names = {f"#{k}": k for k in f}
     values = {f":{k}": v for k, v in f.items()}
+    values[":n"] = n_new
     try:
         old = ddb.table("Alerts").update_item(
             Key={"alert_id": alert_id}, UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in f),
-            ConditionExpression="attribute_exists(alert_id) AND #score < :score",
+            ConditionExpression="attribute_exists(alert_id) AND (#score < :score OR (#score = :score AND size(#event_ids) < :n))",
             ExpressionAttributeNames=names, ExpressionAttributeValues=ddb.to_ddb(values), ReturnValues="ALL_OLD")
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
