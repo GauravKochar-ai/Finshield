@@ -24,7 +24,7 @@ export default function Accuracy() {
           <div className="card"><h3>Slowest time to alert</h3><div className="kpi">{fmt(Math.max(0, ...a.rows.map((r) => r.time_to_alert_ms ?? 0)) / 1000)} s<small>from event to alert</small></div></div>
           <div className="card"><h3>Run</h3><div className="kpi" style={{ fontSize: 18 }}>{a.run_id}<small>{ts(a.ran_at)}</small></div></div></div>
         <div className="card" style={{ marginTop: 16 }}><table><thead><tr><th>Scenario</th><th>Expected</th><th>Result</th><th>Expected score</th><th>Score</th><th>Time to alert</th><th /></tr></thead><tbody>
-          {a.rows.map((r) => <tr key={r.scenario_id}><td><b>{incidentType(r.scenario_id)}</b> <span className="dim mono">{r.scenario_id}</span></td>
+          {a.rows.map((r) => <tr key={r.scenario_id}><td><b>{incidentType(r.scenario_id)}</b></td>
             <td><Pill sev={r.expected_level} /></td><td><Pill sev={r.actual_level} /></td><td>{r.expected_score}</td><td><b>{r.actual_score}</b></td>
             <td className="mono dim">{r.time_to_alert_ms != null ? `${(r.time_to_alert_ms / 1000).toFixed(1)} s` : '—'}</td><td style={{ fontSize: 16 }}>{r.pass ? '✅' : '❌'}</td></tr>)}</tbody></table></div></>}
     </>

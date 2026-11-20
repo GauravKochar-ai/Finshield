@@ -87,3 +87,79 @@ export const ACTION_NAME: Record<string, string> = {
   DNS_BLOCK: 'Outbound upload destination blocked', LOCK_PRINCIPAL: 'Account locked',
 };
 export const actionName = (a: string): string => ACTION_NAME[a] ?? label(a);
+
+// ---------------------------------------------------------------- incident type from what actually fired
+const SIGNAL_TYPE: Record<string, string> = {
+  S1: 'Unusual KYC download volume', S2: 'Slow data leak', S3: 'Privileged role used without approval', S4: 'Data sent to an external site',
+  S5: 'Risky sign-in', S6: 'Off-hours activity', S7: 'Access to unassigned customers', S8: 'Audit logging tampered',
+  S9: 'Consent breach', S10: 'Suspicious disbursement', S11: 'Misconfigured sensitive resource',
+};
+export function alertType(a: { signals: { code: string; points: number }[] }): string {
+  const top = [...a.signals].sort((x, y) => y.points - x.points)[0];
+  return (top && SIGNAL_TYPE[top.code]) || 'Security incident';
+}
+
+// ---------------------------------------------------------------- cloud checks: group per rule, hide ids and ARNs
+const CHECKS: [string, string, string][] = [
+  ['s3-bucket-public-read-prohibited', 'Document storage is not publicly readable', 'storage locations'],
+  ['cloudtrail-enabled', 'Audit logging is switched on', 'accounts'],
+  ['mfa-enabled-for-iam-console-access', 'Multi-factor sign-in enforced for admin users', 'admin users'],
+];
+export interface CheckGroup { name: string; unit: string; total: number; pass: number; fail: string[]; unknown: number }
+export function groupChecks(rows: { control_id: string; status: string }[]): CheckGroup[] {
+  const m = new Map<string, CheckGroup>();
+  rows.forEach((r) => {
+    const parts = r.control_id.split(':');
+    const hit = CHECKS.find((c) => r.control_id.includes(c[0]));
+    const key = hit ? hit[0] : parts[1] ?? r.control_id;
+    const g = m.get(key) ?? { name: hit ? hit[1] : label(key.replace(/^finshield-[a-z]+-/, '').replace(/-/g, ' ')), unit: hit ? hit[2] : 'resources', total: 0, pass: 0, fail: [], unknown: 0 };
+    g.total += 1;
+    if (r.status === 'COMPLIANT') g.pass += 1;
+    else if (r.status === 'NON_COMPLIANT') g.fail.push((parts[parts.length - 1] || '').replace(/-\d{12}$/, ''));
+    else g.unknown += 1;
+    m.set(key, g);
+  });
+  return [...m.values()];
+}
+
+// ---------------------------------------------------------------- readable event runs
+export function cleanRole(r?: string | null): string {
+  if (!r) return '';
+  const n = r.split('/').pop()!.replace(/^finshield-[a-z]+-/i, '').replace(/-[A-Za-z0-9]{10,14}$/, '').replace(/Role$/, '');
+  return n.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ').trim();
+}
+export interface EventRun { first: string; last: string; n: number; action: string; user_id: string; bytes: number; sample: Record<string, any> }
+export function collapseEvents(evs: { ts: string; action: string; user_id: string; bytes?: number | null }[]): EventRun[] {
+  const out: EventRun[] = [];
+  [...evs].sort((a, b) => a.ts.localeCompare(b.ts)).forEach((e) => {
+    const l = out[out.length - 1];
+    if (l && l.action === e.action && l.user_id === e.user_id) { l.n += 1; l.last = e.ts; l.bytes += e.bytes ?? 0; }
+    else out.push({ first: e.ts, last: e.ts, n: 1, action: e.action, user_id: e.user_id, bytes: e.bytes ?? 0, sample: e });
+  });
+  return out;
+}
+export function runText(r: EventRun): string {
+  const s = r.sample, n = r.n, plural = n > 1;
+  switch (r.action) {
+    case 'DOWNLOAD': case 'PRESIGN': return `${fmt(n)} KYC document${plural ? 's' : ''} downloaded${r.bytes ? ` (${bytes(r.bytes)})` : ''}${!plural && s.object_id ? ` · ${s.object_id}` : ''}`;
+    case 'KYC_FILE_UPLOADED': return `${fmt(n)} KYC file${plural ? 's' : ''} uploaded to storage${!plural && s.object_id ? ` · ${s.object_id}` : ''}`;
+    case 'MFA_PUSH': return `${fmt(n)} sign-in approval request${plural ? 's' : ''} (MFA)`;
+    case 'ASSUME_ROLE': return `Switched to the ${cleanRole(s.role)} role`;
+    case 'UPLOAD_EXTERNAL': return `Upload${r.bytes ? ` of ${bytes(r.bytes)}` : ''} to ${s.destination ?? 'an outside site'}`;
+    case 'LOGIN': return `Signed in${s.city ? ` from ${s.city}` : ''}${s.device_id ? ` on device ${s.device_id}` : ''}`;
+    case 'LOGGING_CHANGE': return 'Audit logging was changed';
+    case 'CONFIG_NONCOMPLIANT': return 'A cloud security check failed';
+    case 'GUARDDUTY_FINDING': return 'Threat detection finding';
+    case 'DISBURSE': return `Loan disbursed${s.amount_inr ? ` (₹${fmt(s.amount_inr)})` : ''}`;
+    case 'BANK_ACCOUNT_CHANGE': return 'Borrower bank account changed';
+    default: return `${label(r.action)}${plural ? ` ×${fmt(n)}` : ''}`;
+  }
+}
+
+const EVIDENCE_STEP: Record<string, string> = {
+  ALERT_RAISED: 'Incident detected', DEADLINES_SET: 'Regulator timers started', AI_EXPLAINED: 'AI investigation', REPORTS_DRAFTED: 'Reports drafted',
+  CONTAIN_REVOKE_SESSIONS: 'Sessions signed out', CONTAIN_DEACTIVATE_KEYS: 'Access keys disabled', CONTAIN_BUCKET_DENY: 'KYC storage blocked',
+  CONTAIN_DNS_BLOCK: 'Upload site blocked', DECISION_APPROVED: 'Lock-down approved', DECISION_REJECTED: 'Lock-down rejected', QUARANTINE: 'Account locked',
+  RELEASED: 'Access restored', ESCALATED: 'Escalated to Compliance Head', CLOSED: 'Incident closed', EVIDENCE_EXPORTED: 'Evidence archived',
+};
+export const evidenceStep = (t: string): string => EVIDENCE_STEP[t] ?? label(t).replace(/^./, (c) => c.toUpperCase());

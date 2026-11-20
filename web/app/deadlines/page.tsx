@@ -4,7 +4,7 @@ import { api } from '@/lib/api';
 import { useLoad, useNow } from '@/lib/hooks';
 import { useAlerts } from '@/components/Shell';
 import { Empty, ErrorCard, Loading } from '@/components/ui';
-import { DEADLINE_HOURS, DEADLINE_LABEL, REPORT_LABEL, countdown, incidentType, ts } from '@/lib/format';
+import { DEADLINE_HOURS, DEADLINE_LABEL, REPORT_LABEL, alertType, countdown, ts } from '@/lib/format';
 
 export default function Deadlines() {
   const { alerts, error } = useAlerts();
@@ -22,7 +22,7 @@ export default function Deadlines() {
     <>
       <div className="row" style={{ marginBottom: 16 }}><span className="muted">Incident</span>
         <select style={{ width: 'auto' }} value={id} onChange={(e) => { setSel(e.target.value); setRep(null); }}>
-          {alerts.map((x) => <option key={x.alert_id} value={x.alert_id}>{x.alert_id} · {x.severity} · {incidentType(x.scenario_id)}</option>)}</select></div>
+          {alerts.map((x) => <option key={x.alert_id} value={x.alert_id}>{alertType(x)} · {x.severity} · {x.alert_id}</option>)}</select></div>
       <div className="grid g3">
         {a.deadlines.map((d) => { const h = DEADLINE_HOURS[d.body] ?? 6; const c = countdown(d.due_at, h, now); return (
           <div key={d.body} className="card"><h3>{DEADLINE_LABEL[d.body] ?? d.body}</h3>

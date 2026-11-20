@@ -2,7 +2,7 @@
 import { api } from '@/lib/api';
 import { useLoad } from '@/lib/hooks';
 import { ErrorCard, Loading } from '@/components/ui';
-import { checkName, label, ts } from '@/lib/format';
+import { groupChecks } from '@/lib/format';
 
 const COL: Record<string, string> = { IN_PLACE: '#34d399', GAP: '#f43f5e', UNKNOWN: '#facc15', NOT_APPLICABLE: '#64718e' };
 const LBL: Record<string, string> = { IN_PLACE: 'In place', GAP: 'Gap', UNKNOWN: 'Unknown', NOT_APPLICABLE: 'Not applicable' };
@@ -20,15 +20,16 @@ export default function Compliance() {
       <div className="card" style={{ marginTop: 16 }}>
         {c.data.map((x) => (
           <div key={x.control_id} className="ctrl"><span className="s" style={{ background: COL[x.status], boxShadow: `0 0 0 4px ${COL[x.status]}22` }} />
-            <div><div className="row wrap" style={{ justifyContent: 'space-between' }}><b>{x.obligation}</b><span className="pill cat">{x.control_id}</span></div>
+            <div><div className="row wrap" style={{ justifyContent: 'space-between' }}><b>{x.obligation}</b></div>
               <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>{x.finshield_control}</div></div></div>
         ))}
         <p className="dim" style={{ fontSize: 12, marginTop: 14 }}>DPDP is presented as DPDP-aligned readiness and controls. FinShield&apos;s consent tracking is not a registered DPDP Consent Manager.</p></div>
       <div className="grid g2" style={{ marginTop: 16 }}>
         <div className="card"><h3>Cloud security checks</h3>
-          {(p.data?.config_results ?? []).map((r) => (
-            <div key={r.control_id} className="ctrl"><span className="s" style={{ background: r.status === 'COMPLIANT' ? '#34d399' : r.status === 'NON_COMPLIANT' ? '#f43f5e' : '#64718e' }} />
-              <div><b style={{ fontSize: 13 }}>{checkName(r.control_id)}</b><div className="muted" style={{ fontSize: 12 }}>{label(r.status)} · checked {ts(r.last_evaluated)}</div></div></div>))}</div>
+          {groupChecks(p.data?.config_results ?? []).map((c) => (
+            <div key={c.name} className="ctrl"><span className="s" style={{ background: c.fail.length ? '#f43f5e' : c.unknown ? '#facc15' : '#34d399' }} />
+              <div><b style={{ fontSize: 13 }}>{c.name}</b>
+                <div className="muted" style={{ fontSize: 12 }}>{c.fail.length ? `Failing on ${c.fail.length} of ${c.total} ${c.unit}` : `Passing on all ${c.total} ${c.unit}`}</div></div></div>))}</div>
         <div className="card"><h3>Privacy findings</h3>
           {pr.data && <>
             <b style={{ fontSize: 12.5 }}>Consent risks ({pr.data.consent_risks.length})</b>

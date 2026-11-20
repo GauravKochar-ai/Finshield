@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { api, type EvidenceEntry, type VerifyResult } from '@/lib/api';
 import { useLoad } from '@/lib/hooks';
-import { hm, label } from '@/lib/format';
+import { evidenceStep, hm } from '@/lib/format';
 
 /** Hash-chain view with verify, tamper demo (Admin) and JSON export. Entries are read-only. */
 export function EvidenceChain({ alertId, canTamper, compact }: { alertId: string; canTamper: boolean; compact?: boolean }) {
@@ -39,13 +39,13 @@ export function EvidenceChain({ alertId, canTamper, compact }: { alertId: string
       {verify?.tampered && <div className="seal bad" style={{ marginBottom: 12 }}>Tamper test: one entry was changed in a copy and the seal breaks from entry {v?.broken_at_seq}. The real trail is untouched.</div>}
       {compact ? (
         <table><thead><tr><th>#</th><th>Time</th><th>Step</th><th>By</th><th>Seal</th></tr></thead><tbody>
-          {entries.map((e) => <tr key={e.seq}><td>{e.seq}</td><td className="mono">{e.ts.slice(0, 19).replace('T', ' ')}</td><td>{label(e.type)}</td><td>{e.actor}</td><td className="mono dim">{e.hash.slice(0, 20)}…</td></tr>)}</tbody></table>
+          {entries.map((e) => <tr key={e.seq}><td>{e.seq}</td><td className="mono">{e.ts.slice(0, 19).replace('T', ' ')}</td><td>{evidenceStep(e.type)}</td><td>{e.actor.includes('@') ? e.actor : 'FinShield (automatic)'}</td><td className="mono dim">{e.hash.slice(0, 20)}…</td></tr>)}</tbody></table>
       ) : (
         <div className="chain">
           {entries.map((e, i) => (
             <div key={e.seq} style={{ display: 'contents' }}>
               {i > 0 && <div style={{ alignSelf: 'center', color: '#2c3c61' }}>→</div>}
-              <div className={`blk ${broken && e.seq >= broken ? 'bad' : ''}`}><b>{e.seq}. {label(e.type)}</b><div className="dim">{hm(e.ts)} · {e.actor.slice(0, 18)}</div><div className="h">{e.hash.slice(0, 10)}…</div></div>
+              <div className={`blk ${broken && e.seq >= broken ? 'bad' : ''}`}><b>{e.seq}. {evidenceStep(e.type)}</b><div className="dim">{hm(e.ts)}</div><div className="h">{e.hash.slice(0, 10)}…</div></div>
             </div>
           ))}
         </div>

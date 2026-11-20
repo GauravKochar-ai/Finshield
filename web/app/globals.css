@@ -141,3 +141,9 @@ textarea,input.field{width:100%;background:var(--panel);border:1px solid var(--l
 .toasts .toast{position:static}
 .sc-card{display:flex;flex-direction:column;gap:8px}
 a{color:inherit}
+
+.grid>*{min-width:0}
+.grid.at{align-items:start}
+table.fixed{table-layout:fixed}
+td.trunc,.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ellip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}

@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, useMocks, type Alert, type CognitoGroup } from '@/lib/api';
-import { incidentType, userLabel } from '@/lib/format';
+import { alertType } from '@/lib/format';
 import { MOCK_ROLES, useAuth } from '@/lib/auth';
 import { useLoad } from '@/lib/hooks';
 
@@ -100,7 +100,7 @@ function Frame({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!alerts) return;
     if (known.current) alerts.filter((a) => !known.current!.has(a.alert_id) && a.severity !== 'MEDIUM')
-      .forEach((a) => push({ title: `${a.severity}: ${incidentType(a.scenario_id)}`, body: `${userLabel(a.user_id)} · risk ${a.score}`, href: `/incidents/?id=${a.alert_id}` }));
+      .forEach((a) => push({ title: `${a.severity}: ${alertType(a)}`, body: `${a.alert_id} · risk ${a.score}`, href: `/incidents/?id=${a.alert_id}` }));
     known.current = new Set(alerts.map((a) => a.alert_id));
   }, [alerts, push]);
 

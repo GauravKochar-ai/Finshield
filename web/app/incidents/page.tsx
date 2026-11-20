@@ -10,7 +10,8 @@ import { AlertTable } from '@/components/AlertTable';
 import { EvidenceChain } from '@/components/EvidenceChain';
 import { Ring } from '@/components/charts';
 import { Av, Empty, ErrorCard, Loading, Pill, SevBar, sevColor } from '@/components/ui';
-import { actionName, bytes, fmt, hm, incidentType, label, shortName, signalText, ts, userLabel, SEV_COLOR } from '@/lib/format';
+import { actionName, alertType, bytes, collapseEvents, fmt, hm, label, runText, signalText, ts, SEV_COLOR } from '@/lib/format';
+import { isUnmapped, systemName, useDeidentify } from '@/lib/people';
 
 function Incidents() {
   const { alerts, error } = useAlerts();
@@ -36,7 +37,8 @@ function Detail({ id }: { id: string }) {
   const timeline = useLoad(() => api.getAlertTimeline(id), [id], 5000);
   const rules = useLoad(() => api.getRules(), [], 0);
   const a = alert.data;
-  const user = useLoad(() => (a ? api.getUser(a.user_id) : Promise.resolve(null)), [a?.user_id]);
+  const user = useLoad(() => (a && !isUnmapped(a.user_id) ? api.getUser(a.user_id).catch(() => null) : Promise.resolve(null)), [a?.user_id]);
+  const deid = useDeidentify(a ? [a.user_id] : []);
   if (alert.error && !a) return <ErrorCard message={alert.error} />;
   if (!a) return <Loading />;
 
@@ -58,19 +60,20 @@ function Detail({ id }: { id: string }) {
     ['closed', 'Closed', label(st)],
   ];
   const firstOpen = steps.findIndex((s) => !done[s[0]]);
-  const events = [...(timeline.data ?? [])];
-  const keyEv: (typeof events[number] & { n?: number })[] = [];
-  events.forEach((e) => { const l = keyEv[keyEv.length - 1]; if (l && l.action === e.action && e.action === 'MFA_PUSH') l.n = (l.n ?? 1) + 1; else keyEv.push({ ...e }); });
-  const KEYS = ['UPLOAD_EXTERNAL', 'ASSUME_ROLE', 'STOP_LOGGING', 'CONFIG_CHANGE'];
+  const runs = collapseEvents(timeline.data ?? []);
+  const KEYS = ['UPLOAD_EXTERNAL', 'ASSUME_ROLE', 'LOGGING_CHANGE', 'CONFIG_NONCOMPLIANT', 'GUARDDUTY_FINDING'];
+  const system = isUnmapped(a.user_id);
+  const displayName = system ? systemName(a.user_id) : user.data?.name_pseudo ?? a.user_id;
+  const say = (t: string) => deid(t, a.user_id, displayName);
 
   return (
     <>
       <div className={`banner ${a.severity[0] + a.severity.slice(1).toLowerCase()}`}>
         <div>
-          <div className="row wrap"><Pill sev={a.severity}>● {a.severity}</Pill><span className="pill cat">{incidentType(a.scenario_id)}</span><span className="mono dim">{a.alert_id}</span></div>
-          <h2>{ai?.headline ?? 'Incident under investigation'}</h2>
+          <div className="row wrap"><Pill sev={a.severity}>● {a.severity}</Pill><span className="pill cat">{alertType(a)}</span><span className="mono dim">{a.alert_id}</span></div>
+          <h2>{ai ? say(ai.headline) : alertType(a)}</h2>
           <div className="row wrap muted" style={{ gap: 16, fontSize: 13 }}>
-            <span className="who"><Av name={userLabel(a.user_id)} size={26} /><b style={{ color: 'var(--ink)' }}>{user.data?.name_pseudo ?? userLabel(a.user_id)}</b>{user.data && <> · {user.data.role} · {user.data.team}</>}</span>
+            <span className="who"><Av name={displayName} size={26} /><b style={{ color: 'var(--ink)' }}>{displayName}</b>{system ? ' · system role, not linked to a person' : user.data ? <> · {user.data.role} · {user.data.team}</> : null}</span>
             <span>Detected {ts(a.detected_at)} IST</span><span>Activity from {hm(a.window_start)}</span></div>
           <div className="steps" style={{ marginTop: 20 }}>
             {steps.map((s, i) => <div key={s[0]} className={`step ${done[s[0]] ? 'done' : i === firstOpen ? 'now' : ''}`}><div className="c">{done[s[0]] ? '✓' : i + 1}</div><b>{s[1]}</b>{s[2]}</div>)}</div></div>
@@ -78,8 +81,8 @@ function Detail({ id }: { id: string }) {
       </div>
 
       <div className="grid g4" style={{ marginTop: 16 }}>
-        <div className="card tile"><div className="v" style={{ color: a.customers_affected ? '#fda4af' : undefined }}>{fmt(a.customers_affected)}</div><div className="l">customers affected · counted by code</div></div>
-        <div className="card tile"><div className="v">{a.data_classes.join(', ') || 'NONE'}</div><div className="l">{a.event_ids.length} events in this incident</div></div>
+        <div className="card tile"><div className="v" style={{ color: a.customers_affected ? '#fda4af' : undefined }}>{fmt(a.customers_affected)}</div><div className="l">customers affected</div></div>
+        <div className="card tile"><div className="v">{fmt((timeline.data ?? []).length || a.event_ids.length)}</div><div className="l">events · {a.data_classes.filter((d) => d !== 'NONE').join(', ') || 'no customer data'}</div></div>
         <div className="card tile"><div className="v">{s4 ? bytes(sent) : '—'}</div><div className="l">{s4 ? `sent to ${s4.facts.destination}` : 'no data sent outside'}</div></div>
         <div className="card tile"><div className="v">{ratio ? `${fmt(ratio)}×` : '—'}</div><div className="l">{s1 ? `${fmt(s1.facts.downloads_15m as number)} downloads / 15 min vs usual ${fmt(s1.facts.baseline_p95 as number)}` : 'no volume spike'}</div></div>
       </div>
@@ -91,13 +94,13 @@ function Detail({ id }: { id: string }) {
               <SevBar pct={(s.points / 40) * 100} color="linear-gradient(90deg,#fb923c,#f43f5e)" /><b style={{ textAlign: 'right' }}>+{s.points}</b></div>
           ))}
           {a.exceptions_applied.length > 0 && <p className="muted">Approved work {a.exceptions_applied.join(', ')} applied, score capped.</p>}
-          {keyEv.length > 0 && <><h3 style={{ marginTop: 16 }}>Key events</h3>
-            <div className="tl" style={{ maxHeight: 360, overflow: 'auto' }}>{keyEv.slice(0, 60).map((e) => (
-              <div key={e.event_id} className={`tli ${KEYS.includes(e.action) ? 'bad' : ''}`} title={e.resource_arn ?? undefined}><div className="t">{hm(e.ts)}</div>
-                <div>{e.action === 'MFA_PUSH' ? `${e.n ?? 1} login approval pop-ups (MFA)` : label(e.action)} · {userLabel(e.user_id)}{e.object_id ? ` · ${e.object_id}` : ''}{e.role && !e.user_id?.startsWith('unmapped:') ? ` · role ${shortName(e.role)}` : ''}{e.destination ? ` → ${e.destination}` : ''}{e.device_id && e.action === 'LOGIN' ? ` · device ${e.device_id}` : ''}</div></div>
+          {runs.length > 0 && <><h3 style={{ marginTop: 16 }}>What happened</h3>
+            <div className="tl" style={{ maxHeight: 360, overflow: 'auto' }}>{runs.slice(0, 40).map((r, i) => (
+              <div key={i} className={`tli ${KEYS.includes(r.action) ? 'bad' : ''}`}><div className="t">{hm(r.first)}{r.n > 1 && hm(r.last) !== hm(r.first) ? `–${hm(r.last)}` : ''}</div>
+                <div>{runText(r)}</div></div>
             ))}</div></>}
         </div>
-        <AiCard alert={a} groups={groups} />
+        <AiCard alert={a} groups={groups} say={say} />
       </div>
 
       <div className="grid g2" style={{ marginTop: 16 }}>
@@ -111,20 +114,20 @@ function Detail({ id }: { id: string }) {
       </div>
 
       {user.data && (
-        <div className="card" style={{ marginTop: 16 }}><h3>Identity baseline <span className="r">{user.data.user_id} · {user.data.team}</span></h3>
+        <div className="card" style={{ marginTop: 16 }}><h3>Normal behaviour for {displayName} <span className="r">learned from past activity</span></h3>
           <div className="grid g4" style={{ gap: 14, fontSize: 12.5 }}>
-            <div><b>{user.data.baseline.p95_15min}</b><div className="muted">usual downloads / 15 min (p95)</div></div>
-            <div><b>{user.data.baseline.avg_daily}</b><div className="muted">usual per day</div></div>
-            <div><b>{user.data.baseline.usual_hours}</b><div className="muted">usual hours · {user.data.baseline.cities.join(', ')}</div></div>
-            <div><b>{user.data.baseline.devices.join(', ') || '—'}</b><div className="muted">known devices</div></div></div>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>Deadlines: {a.deadlines.map((d) => `${d.body} ${ts(d.due_at)}`).join(' · ')}</div></div>
+            <div><b>{fmt(user.data.baseline.p95_15min)}</b><div className="muted">KYC downloads in a busy 15 min</div></div>
+            <div><b>{fmt(user.data.baseline.avg_daily)}</b><div className="muted">KYC downloads on a normal day</div></div>
+            <div><b>{user.data.baseline.usual_hours}</b><div className="muted">working hours{user.data.baseline.cities.length ? ` · ${user.data.baseline.cities.join(', ')}` : ''}</div></div>
+            <div><b>{user.data.baseline.devices.length}</b><div className="muted">known device{user.data.baseline.devices.length === 1 ? '' : 's'}</div></div></div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>The warning signs above are measured against these numbers.</div></div>
       )}
       <EvidenceChain alertId={id} canTamper={can.admin(groups)} />
     </>
   );
 }
 
-function AiCard({ alert: a, groups }: { alert: Alert; groups: Parameters<typeof can.ask>[0] }) {
+function AiCard({ alert: a, groups, say }: { alert: Alert; groups: Parameters<typeof can.ask>[0]; say: (t: string) => string }) {
   const ai = a.ai;
   const [q, setQ] = useState(''), [ans, setAns] = useState<AskResult | null>(null), [busy, setBusy] = useState(false), [err, setErr] = useState('');
   const ask = async () => {
@@ -135,15 +138,15 @@ function AiCard({ alert: a, groups }: { alert: Alert; groups: Parameters<typeof 
   return (
     <div className="card ai"><h3><svg width="15" height="15" viewBox="0 0 24 24" fill="#a78bfa"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z" /></svg> AI investigation</h3>
       {ai ? <>
-        <div className="head">{ai.headline}</div><p style={{ color: '#cfd7e8', lineHeight: 1.55 }}>{ai.summary}</p>
-        {ai.why_unusual.length > 0 && <><b>Why it is unusual</b><ul>{ai.why_unusual.map((x) => <li key={x}>{x}</li>)}</ul></>}
+        <div className="head">{say(ai.headline)}</div><p style={{ color: '#cfd7e8', lineHeight: 1.55 }}>{say(ai.summary)}</p>
+        {ai.why_unusual.length > 0 && <><b>Why it is unusual</b><ul>{ai.why_unusual.map((x) => <li key={x}>{say(x)}</li>)}</ul></>}
         {ai.root_cause_hypotheses.length > 0 && <div style={{ background: 'rgba(167,139,250,.08)', border: '1px solid rgba(167,139,250,.25)', borderRadius: 10, padding: '10px 12px', margin: '10px 0' }}>
-          <b>Likely root cause</b><div style={{ color: '#cfd7e8', marginTop: 3 }}>{ai.root_cause_hypotheses.join(' · ')}</div></div>}
+          <b>Likely root cause</b><div style={{ color: '#cfd7e8', marginTop: 3 }}>{ai.root_cause_hypotheses.map(say).join(' · ')}</div></div>}
         <div className="grid g2" style={{ gap: 14 }}>
           <div><b>Regulations engaged</b><ul>{ai.rules_affected.map((r) => <li key={r.regulation + r.clause}>{r.regulation} <span className="dim">· {r.clause}</span></li>)}</ul></div>
-          <div><b>Recommended next steps</b><ul>{ai.recommended_actions.map((x) => <li key={x}>{x}</li>)}</ul>
+          <div><b>Recommended next steps</b><ul>{ai.recommended_actions.map((x) => <li key={x}>{say(x)}</li>)}</ul>
             </div></div>
-        <div className="muted" style={{ fontSize: 12.5 }}>Confidence <b style={{ color: 'var(--ink)' }}>{ai.confidence}</b> · {ai.confidence_reason}</div>
+        <div className="muted" style={{ fontSize: 12.5 }}>Confidence <b style={{ color: 'var(--ink)' }}>{ai.confidence}</b> · {say(ai.confidence_reason)}</div>
       </> : <div className="muted">Investigating…</div>}
       {can.ask(groups) && (
         <div style={{ marginTop: 14, borderTop: '1px solid var(--line)', paddingTop: 12 }}>
@@ -152,7 +155,7 @@ function AiCard({ alert: a, groups }: { alert: Alert; groups: Parameters<typeof 
           {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
           {ans && <div style={{ marginTop: 10, fontSize: 13, color: '#cfd7e8', lineHeight: 1.55 }}>
             {ans.ai_status && <span className="pill" style={{ marginRight: 8, fontSize: 11, background: ans.ai_status === 'OK' ? 'rgba(167,139,250,.15)' : 'rgba(148,163,184,.15)', color: ans.ai_status === 'OK' ? '#a78bfa' : '#94a3b8' }}>{ans.ai_status === 'OK' ? 'AI' : 'Rule-based'}</span>}
-            {ans.answer}</div>}
+            {say(ans.answer)}</div>}
         </div>)}
     </div>
   );
@@ -164,7 +167,7 @@ function SignOff({ alert: a, groups, onChange }: { alert: Alert; groups: Paramet
   const pending = a.status === 'AWAITING_APPROVAL';
   return (
     <div className="card"><h3>Human sign-off</h3>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{pending ? 'Lock down the principal' : label(a.status)}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{pending ? 'Lock down the account' : label(a.status)}</div>
       <div className="muted">Status <b style={{ color: a.status === 'LOCKED' ? '#34d399' : pending ? '#fdba74' : 'var(--ink)' }}>{label(a.status)}</b></div>
       {pending && can.decide(groups) && <input className="field" style={{ marginTop: 12 }} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (kept in the evidence trail)" />}
       <div className="row" style={{ marginTop: 14 }}>
