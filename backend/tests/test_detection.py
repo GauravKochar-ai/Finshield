@@ -244,6 +244,17 @@ def test_cloudtrail_getobject_on_kyc_bucket_becomes_download(env):
     assert out["status"] == "SKIPPED" and ev is None
 
 
+def test_cloudtrail_getobject_signed_by_the_staff_api_role_is_dropped(env, monkeypatch):
+    """A staff_api presigned URL is reported by the app itself (real staff user); CloudTrail's copy is not counted."""
+    monkeypatch.setenv("STAFF_APP_ROLE_ARN", "arn:aws:iam::000000000000:role/finshield-dev-StaffApiFunctionRole-ABC")
+    key = "kyc/C-10001/KYC-PAN-C-10001.png"
+    staff = {"type": "AssumedRole", "arn": "arn:aws:sts::000000000000:assumed-role/finshield-dev-StaffApiFunctionRole-ABC/fn"}
+    out, ev = _norm(env, _ct("GetObject", requestParameters={"bucketName": KYC_BUCKET, "key": key}, userIdentity=staff))
+    assert out["status"] == "SKIPPED" and ev is None
+    out, ev = _norm(env, _ct("GetObject", requestParameters={"bucketName": KYC_BUCKET, "key": key}))
+    assert out["status"] == "OK" and ev["user_id"] == "u-017"
+
+
 def test_cloudtrail_role_logging_and_signin(env):
     _o, ev = _norm(env, _ct("AssumeRole", requestParameters={"roleArn": "arn:aws:iam::000000000000:role/KYC-Emergency"}))
     assert (ev["action"], ev["role"]) == ("ASSUME_ROLE", "KYC-Emergency")

@@ -102,6 +102,8 @@ def from_cloudtrail(detail: dict) -> dict | None:
         kyc = os.environ.get("KYC_BUCKET")
         if not kyc or req.get("bucketName") != kyc:
             return None  # only data events on the KYC document bucket are monitored
+        if role and role == os.environ.get("STAFF_APP_ROLE_ARN"):
+            return None  # a staff_api presigned URL: the app already reported this access with the real staff user
         m = KEY_RX.match(req.get("key", ""))
         if not m:
             return None

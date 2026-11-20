@@ -92,3 +92,27 @@
 - `ai_suggest/regulations.json` is a copy of `ai_explain/regulations.json` (NOT VERIFIED list). Keep both in step when Arvind replaces it.
 - `slack_notify` runs on `Alert Raised`. Webhook: SSM SecureString `/finshield/dev/slack_webhook_url` (not created by the template;
   unset means Slack is off). Optional `/finshield/dev/portal_url` adds an "Open case" button. Test count in test_template.py 13 -> 14 tables.
+## CHANGE-10 (final deploy, Keshav): FinLend Ops staff routes, Staff group, "all" = console groups
+- Six routes for the FinLend Ops staff portal (user-web), all `x-groups: [Staff]`, served by the new Lambda
+  `finshield-dev-staff-api`: `GET /staff/me`, `GET /staff/customers` (`q`, `purpose`), `GET /staff/customers/{id}`
+  (`purpose`), `GET /staff/customers/{id}/consent` (`purpose`), `POST /staff/customers/{id}/kyc-upload`
+  (`{doc_type, purpose, content_type}` -> presigned PUT, 300 s), `POST /staff/kyc/{id}/url` (`{purpose, disposition}` ->
+  presigned GET, 300 s, inline or attachment). Fixtures `api_staff_*.json` (SAMPLE, u-031, C-10001).
+- New Cognito group `Staff` (template resource `GroupStaff`). x-groups `all` now means the five console groups (Admin,
+  Analyst, SecurityHead, ComplianceHead, Auditor), enforced once in `finshield/http.py require()`: a Staff token gets 403
+  FORBIDDEN on every console route, and console users get 403 on /staff/*.
+- Persona mapping: `Users.staff_email` (u-017 ops.admin@finlend.example, u-031 collections.agent@finlend.example,
+  u-037 marketing.user@finlend.example); unmapped sign-in -> 403 `STAFF_NOT_MAPPED`. Every Users row gets
+  `default_purpose` (the team purpose), used when a request gives no `purpose`.
+- Containment gate: a staff user whose recent alerts include one in CONTAINED / AWAITING_APPROVAL / LOCKED gets 403
+  `ACCESS_CONTAINED` on every customer-data route (message names the alert and the mode LIVE / DRY_RUN). A denied request
+  emits no event (no data was read, and it must not raise the score of the alert that contained the user). RELEASED /
+  CLOSED / OPEN do not block, so release restores access. `GET /staff/me` never 403s for containment and returns the state.
+- Each allowed customer-data request emits one Raw Activity event: `source "app"`, `event_id "app-" + API requestId`
+  (a retried request is deduplicated by the normalizer), the real staff user and principal, `purpose`, `ip`; VIEW PII
+  (list, customer, consent), VIEW or DOWNLOAD KYC (file URL, DOWNLOAD carries `bytes = size_kb * 1024`), PRESIGN KYC (upload).
+- `Customers.pan_fake` is now `SAMPL<nnnn>A` (manifest value when Roopak's manifest has a row, same formula otherwise) and
+  AADHAAR manifest rows give `aadhaar_last4`, so the record agrees with the card image. The API exposes only
+  `aadhaar_masked` (`XXXX XXXX <last4>`).
+- The normalizer drops CloudTrail `GetObject` records whose role is the staff-api role (env `STAFF_APP_ROLE_ARN`): the app
+  already reported that access with the real staff user (no double counting, no `unmapped:` pseudo-user).

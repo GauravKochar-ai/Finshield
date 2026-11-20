@@ -6,6 +6,8 @@ info:
   description: >
     HTTP API behind a Cognito JWT authorizer. Every response uses the envelope
     {"data": ..., "error": null}. Errors use {"data": null, "error": {"code", "message"}}.
+    x-groups "all" means the five console groups (Admin, Analyst, SecurityHead, ComplianceHead, Auditor);
+    the Staff group (FinLend Ops) is only allowed on /staff/* and gets 403 FORBIDDEN on every other route.
     DPDP-aligned readiness and controls. All sample data is synthetic (SAMPLE).
 servers:
   - url: https://{apiId}.execute-api.ap-south-1.amazonaws.com/v1
@@ -18,6 +20,7 @@ tags:
   - { name: evidence }
   - { name: response }
   - { name: admin }
+  - { name: staff, description: 'FinLend Ops staff portal (Cognito group Staff). Every customer-data request is reported as a Raw Activity event (source app).' }
 
 paths:
   /posture:
@@ -231,20 +234,168 @@ paths:
         '200': { $ref: '#/components/responses/Accuracy' }
         default: { $ref: '#/components/responses/Error' }
 
+  # ---------------- FinLend Ops staff portal (group Staff only) ----------------
+  # Customer-data routes return 403 ACCESS_CONTAINED while the caller has an alert in CONTAINED, AWAITING_APPROVAL or
+  # LOCKED (no event is emitted for a denied request), and 403 STAFF_NOT_MAPPED when the sign-in email is not a
+  # FinLend Ops staff user (Users.staff_email). Each allowed request emits one Raw Activity event (source app).
+  /staff/me:
+    get:
+      operationId: staffMe
+      tags: [staff]
+      summary: The signed-in staff user (persona) and its containment state; never 403 for containment
+      x-groups: [Staff]
+      responses:
+        '200': { $ref: '#/components/responses/StaffMe' }
+        '403': { $ref: '#/components/responses/StaffForbidden' }
+        default: { $ref: '#/components/responses/Error' }
+  /staff/customers:
+    get:
+      operationId: staffCustomers
+      tags: [staff]
+      summary: Customer list (max 50). ASSIGNED scope = own book; marketing = marketing-consented; ALL = first 50. Emits VIEW PII.
+      x-groups: [Staff]
+      parameters:
+        - { name: q, in: query, description: Exact customer id, schema: { type: string } }
+        - { $ref: '#/components/parameters/Purpose' }
+      responses:
+        '200': { $ref: '#/components/responses/StaffCustomers' }
+        '403': { $ref: '#/components/responses/StaffForbidden' }
+        default: { $ref: '#/components/responses/Error' }
+  /staff/customers/{id}:
+    get:
+      operationId: staffCustomer
+      tags: [staff]
+      summary: Customer with KYC files and whether the purpose is consented. Emits VIEW PII.
+      x-groups: [Staff]
+      parameters:
+        - { $ref: '#/components/parameters/CustomerId' }
+        - { $ref: '#/components/parameters/Purpose' }
+      responses:
+        '200': { $ref: '#/components/responses/StaffCustomer' }
+        '403': { $ref: '#/components/responses/StaffForbidden' }
+        default: { $ref: '#/components/responses/Error' }
+  /staff/customers/{id}/consent:
+    get:
+      operationId: staffConsent
+      tags: [staff]
+      summary: Read-only consent ledger view for one customer. Emits VIEW PII.
+      x-groups: [Staff]
+      parameters:
+        - { $ref: '#/components/parameters/CustomerId' }
+        - { $ref: '#/components/parameters/Purpose' }
+      responses:
+        '200': { $ref: '#/components/responses/StaffConsent' }
+        '403': { $ref: '#/components/responses/StaffForbidden' }
+        default: { $ref: '#/components/responses/Error' }
+  /staff/customers/{id}/kyc-upload:
+    post:
+      operationId: staffKycUpload
+      tags: [staff]
+      summary: Presigned PUT (300 s) for kyc/<id>/KYC-<DOC>-<id>.<png|jpg>; kyc_label labels the file after upload. Emits PRESIGN KYC.
+      x-groups: [Staff]
+      parameters: [{ $ref: '#/components/parameters/CustomerId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [doc_type]
+              additionalProperties: false
+              properties:
+                doc_type: { enum: [PAN, AADHAAR, SELFIE, ADDRESS] }
+                purpose: { $ref: '#/components/schemas/Purpose' }
+                content_type: { enum: [image/png, image/jpeg], default: image/png }
+      responses:
+        '200': { $ref: '#/components/responses/StaffKycUpload' }
+        '403': { $ref: '#/components/responses/StaffForbidden' }
+        default: { $ref: '#/components/responses/Error' }
+  /staff/kyc/{id}/url:
+    post:
+      operationId: staffKycUrl
+      tags: [staff]
+      summary: Presigned GET (300 s) for one KYC file, inline (view) or attachment (download). Emits VIEW or DOWNLOAD KYC.
+      x-groups: [Staff]
+      parameters: [{ $ref: '#/components/parameters/FileId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                purpose: { $ref: '#/components/schemas/Purpose' }
+                disposition: { enum: [view, download], default: view }
+      responses:
+        '200': { $ref: '#/components/responses/StaffKycUrl' }
+        '403': { $ref: '#/components/responses/StaffForbidden' }
+        default: { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     cognito:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Cognito user pool JWT. Groups Analyst, SecurityHead, ComplianceHead, Auditor (read-only), Admin.
+      description: >
+        Cognito user pool ID token. Console groups Analyst, SecurityHead, ComplianceHead, Auditor (read-only), Admin;
+        x-groups "all" = these five. Group Staff (FinLend Ops) is only allowed on /staff/*.
   parameters:
     AlertId:
       name: id
       in: path
       required: true
       schema: { type: string, pattern: '^ALR-\d{8}-\d{4}$' }
+    CustomerId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^C-\d{5}$' }
+    FileId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^KYC-[A-Z_]+-C-\d{5}$' }
+    Purpose:
+      name: purpose
+      in: query
+      description: Purpose of this access; defaults to the staff user's team purpose. Checked against the consent ledger by detection (S9).
+      schema: { $ref: '#/components/schemas/Purpose' }
   schemas:
+    Purpose:
+      enum: [loan_processing, collections, marketing, audit, registry_upload]
+    StaffContainment:
+      type: [object, 'null']
+      required: [alert_id, status, mode]
+      additionalProperties: false
+      properties:
+        alert_id: { type: string }
+        status: { enum: [CONTAINED, AWAITING_APPROVAL, LOCKED] }
+        mode: { enum: [LIVE, DRY_RUN] }
+    StaffCustomerRow:
+      type: object
+      required: [customer_id, city, loan_id, assigned_agent, partner_id, aadhaar_masked, pan_fake, sample]
+      properties:
+        customer_id: { type: string }
+        city: { type: string }
+        loan_id: { type: string }
+        assigned_agent: { type: [string, 'null'] }
+        partner_id: { type: [string, 'null'] }
+        aadhaar_masked: { type: [string, 'null'], pattern: '^XXXX XXXX \d{4}$', description: Last 4 digits only (Aadhaar vault assumption) }
+        pan_fake: { type: [string, 'null'] }
+        sample: { type: boolean }
+    StaffKycFile:
+      type: object
+      required: [file_id, doc_type, size_kb, ai_label, unmasked_aadhaar_flag, available]
+      additionalProperties: false
+      properties:
+        file_id: { type: string }
+        doc_type: { enum: [PAN, AADHAAR, SELFIE, ADDRESS] }
+        size_kb: { type: [integer, 'null'] }
+        ai_label: { type: [string, 'null'] }
+        unmasked_aadhaar_flag: { type: boolean }
+        available: { type: boolean, description: The object is in the KYC bucket (labelled by kyc_label) }
     Error:
       type: object
       required: [code, message]
@@ -661,3 +812,138 @@ components:
                   rows:
                     type: array
                     items: { $ref: '#/components/schemas/AccuracyRow' }
+    StaffForbidden:
+      description: >
+        403. FORBIDDEN = not in the Staff group; STAFF_NOT_MAPPED = the sign-in email is not a FinLend Ops staff user;
+        ACCESS_CONTAINED = the staff user has an alert in CONTAINED, AWAITING_APPROVAL or LOCKED (the message names the
+        alert and the containment mode, LIVE or DRY_RUN). A denied request emits no event.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              data: { type: 'null' }
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: { enum: [FORBIDDEN, STAFF_NOT_MAPPED, ACCESS_CONTAINED] }
+                  message: { type: string }
+    StaffMe:
+      description: Signed-in staff user
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [user_id, name_pseudo, team, role, access_scope, default_purpose, containment]
+                additionalProperties: false
+                properties:
+                  user_id: { type: string }
+                  name_pseudo: { type: string }
+                  team: { type: string }
+                  role: { type: string }
+                  access_scope: { enum: [ALL, ASSIGNED] }
+                  default_purpose: { $ref: '#/components/schemas/Purpose' }
+                  containment: { $ref: '#/components/schemas/StaffContainment' }
+    StaffCustomers:
+      description: Customer list (max 50, sorted by id)
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: array
+                maxItems: 50
+                items: { $ref: '#/components/schemas/StaffCustomerRow' }
+    StaffCustomer:
+      description: Customer with KYC files
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                allOf:
+                  - { $ref: '#/components/schemas/StaffCustomerRow' }
+                  - type: object
+                    required: [kyc_files, purpose_consented]
+                    properties:
+                      kyc_files:
+                        type: array
+                        items: { $ref: '#/components/schemas/StaffKycFile' }
+                      purpose_consented: { type: boolean }
+    StaffConsent:
+      description: Consent ledger view (read-only)
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [customer_id, purposes, withdrawn, given_at, notice_version, purpose, purpose_consented, sample]
+                additionalProperties: false
+                properties:
+                  customer_id: { type: string }
+                  purposes: { type: array, items: { $ref: '#/components/schemas/Purpose' } }
+                  withdrawn: { type: array, items: { $ref: '#/components/schemas/Purpose' } }
+                  given_at: { type: [string, 'null'] }
+                  notice_version: { type: [string, 'null'] }
+                  purpose: { $ref: '#/components/schemas/Purpose' }
+                  purpose_consented: { type: boolean, description: purpose is in purposes and not in withdrawn }
+                  sample: { type: boolean }
+    StaffKycUpload:
+      description: Presigned PUT; send the file with method PUT and exactly these headers
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [file_id, s3_key, url, method, headers, expires_in]
+                additionalProperties: false
+                properties:
+                  file_id: { type: string, pattern: '^KYC-[A-Z_]+-C-\d{5}$' }
+                  s3_key: { type: string, pattern: '^kyc/C-\d{5}/KYC-[A-Z_]+-C-\d{5}\.(png|jpg)$' }
+                  url: { type: string }
+                  method: { const: PUT }
+                  headers:
+                    type: object
+                    required: [content-type]
+                    properties:
+                      content-type: { enum: [image/png, image/jpeg] }
+                  expires_in: { type: integer }
+    StaffKycUrl:
+      description: Presigned GET for one KYC file
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [file_id, disposition, url, expires_in]
+                additionalProperties: false
+                properties:
+                  file_id: { type: string }
+                  disposition: { enum: [view, download] }
+                  url: { type: string }
+                  expires_in: { type: integer }

@@ -26,19 +26,22 @@ results = []
 
 
 def token(user):
+    """user: a console name (admin -> admin@finshield.example) or a full email (FinLend Ops staff)."""
+    email = user if "@" in user else f"{user}@finshield.example"
     r = idp.initiate_auth(ClientId=CLIENT, AuthFlow="USER_PASSWORD_AUTH",
-                          AuthParameters={"USERNAME": f"{user}@finshield.example", "PASSWORD": PASSWORD})
+                          AuthParameters={"USERNAME": email, "PASSWORD": PASSWORD})
     return r["AuthenticationResult"]["IdToken"]
 
 
-def call(method, path, tok, body=None):
+def call(method, path, tok, body=None, want_headers=False):
     req = urllib.request.Request(API + path, method=method, data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Authorization": tok, "content-type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
-            return r.status, json.loads(r.read() or b"{}")
+            out = r.status, json.loads(r.read() or b"{}"), r.headers
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read() or b"{}")
+        out = e.code, json.loads(e.read() or b"{}"), e.headers
+    return out if want_headers else out[:2]
 
 
 def check(name, ok, info=""):
@@ -57,6 +60,38 @@ def wait(fn, secs=60, every=3):
 
 admin, lead, analyst = token("admin"), token("securityhead"), token("analyst")
 check("cognito sign-in (admin, securityhead, analyst)", True)
+
+# ---- FinLend Ops staff portal (group Staff, /staff/* only). collections.agent = u-031, its book is C-10001..C-10200.
+coll, ops = token("collections.agent@finlend.example"), token("ops.admin@finlend.example")
+check("cognito sign-in (collections.agent, ops.admin: group Staff)", True)
+st, b = call("GET", "/staff/me", coll)
+check("Staff GET /staff/me -> u-031", st == 200 and b["data"]["user_id"] == "u-031", (b.get("data") or b.get("error")))
+st, b = call("GET", "/staff/customers?purpose=collections", coll)
+check("Staff GET /staff/customers: own book", st == 200 and len(b["data"] or []) > 0 and
+      all(c["assigned_agent"] == "u-031" for c in b["data"]), f"{len(b.get('data') or [])} customers")
+st, b, hdr = call("POST", "/staff/kyc/KYC-PAN-C-10001/url", coll, {"purpose": "collections", "disposition": "view"},
+                  want_headers=True)
+url = (b.get("data") or {}).get("url") or ""
+check("Staff POST /staff/kyc/KYC-PAN-C-10001/url", st == 200 and url.startswith("https://"), url[:70])
+if url:
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            img = r.status, r.headers.get("content-type"), len(r.read())
+    except urllib.error.HTTPError as e:
+        img = e.code, None, 0
+    check("presigned KYC URL returns the image", img[0] == 200 and img[1] == "image/png", img)
+rid = hdr.get("apigw-requestid")
+ev_tbl = boto3.resource("dynamodb", region_name=REGION).Table(f"{STACK}-Events")
+from boto3.dynamodb.conditions import Attr, Key  # noqa: E402
+since = time.strftime("%Y-%m-%dT", time.gmtime(time.time() - 86400))
+ev = wait(lambda: (ev_tbl.query(KeyConditionExpression=Key("user_id").eq("u-031") & Key("sk").gt(since),
+                                FilterExpression=Attr("event_id").eq(f"app-{rid}")).get("Items") or [None])[0], 30)
+check("staff KYC view is a Raw Activity event in Events (source app, u-031)",
+      bool(ev) and ev["source"] == "app" and ev["action"] == "VIEW" and ev["data_class"] == "KYC", (ev or {}).get("event_id"))
+st, b = call("GET", "/alerts", coll)
+check("Staff GET /alerts refused (console routes are console groups only)", st == 403, st)
+st, b = call("GET", "/staff/me", lead)
+check("securityhead GET /staff/me refused (Staff only)", st == 403, st)
 
 st, b = call("POST", "/simulate", analyst, {"scenario_id": "SC-01"})
 check("POST /simulate refuses a non-Admin", st == 403, st)
@@ -113,6 +148,9 @@ if al:
     check("containment recorded (4 actions)", len(al["containment"]) >= 4,
           ", ".join(f"{c['action']} {c['result']} {c['mode']}" for c in al["containment"]))
     check("ai card filled", al["ai_status"] in ("OK", "FALLBACK") and al["ai"] is not None, al["ai_status"])
+    st, b = call("GET", "/staff/customers", ops)
+    check("ops.admin (u-017) contained: GET /staff/customers 403 ACCESS_CONTAINED",
+          st == 403 and (b.get("error") or {}).get("code") == "ACCESS_CONTAINED", (b.get("error") or {}).get("message"))
 reps = wait(lambda: (lambda r: r if len(r) == 4 else None)(call("GET", f"/alerts/{aid}/reports", analyst)[1].get("data") or []), 60)
 check("GET /alerts/{id}/reports: 4 drafts", bool(reps), ", ".join(f"{r['report_type']} {r['status']}" for r in reps or []))
 st, b = call("POST", f"/alerts/{aid}/decision", analyst, {"decision": "APPROVE", "reason": "test"})
@@ -136,12 +174,16 @@ check("real chain still valid after tamper demo", b["data"]["valid"] is True)
 st, b = call("POST", f"/alerts/{aid}/release", lead)
 check("POST /alerts/{id}/release", st == 200 and b["data"]["status"] == "RELEASED",
       ", ".join(f"{r['action']} {r['result']}" for r in (b.get("data") or {}).get("released", [])))
+st, b = call("GET", "/staff/customers", ops)
+check("ops.admin after release: GET /staff/customers 200", st == 200 and len(b.get("data") or []) > 0, st)
 st, b = call("GET", "/accuracy", admin)
 check("GET /accuracy (latest run)", st == 200 and b["data"]["total"] == 11, f"{b['data']['passed']}/{b['data']['total']}" if st == 200 else st)
 
 s3 = boto3.client("s3", region_name=REGION)
 key = "kyc/C-10001/KYC-PAN-C-10001.png"
-s3.put_object(Bucket=OUT["KycBucket"], Key=key, Body=b"\x89PNG SAMPLE", ContentType="image/png")
+local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "simulator", "seed", "kyc-docs", key[4:])
+body = open(local, "rb").read() if os.path.isfile(local) else b"\x89PNG SAMPLE"  # keep Roopak's real image in the bucket
+s3.put_object(Bucket=OUT["KycBucket"], Key=key, Body=body, ContentType="image/png", Tagging="sample=true&project=finshield")
 ddbt = boto3.resource("dynamodb", region_name=REGION).Table(f"{STACK}-KycFiles")
 row = wait(lambda: (lambda i: i if i and i.get("label_source") else None)(ddbt.get_item(Key={"file_id": "KYC-PAN-C-10001"}).get("Item")), 45)
 check("kyc_label: S3 upload labelled in KycFiles", bool(row), (row or {}).get("ai_label"))

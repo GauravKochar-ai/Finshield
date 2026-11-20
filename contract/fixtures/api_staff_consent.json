@@ -1,0 +1,13 @@
+{
+  "data": {
+    "customer_id": "C-10001",
+    "purposes": ["loan_processing", "collections", "audit", "registry_upload"],
+    "withdrawn": [],
+    "given_at": "2026-04-12T10:15:00+05:30",
+    "notice_version": "v2.1-SAMPLE",
+    "purpose": "collections",
+    "purpose_consented": true,
+    "sample": true
+  },
+  "error": null
+}

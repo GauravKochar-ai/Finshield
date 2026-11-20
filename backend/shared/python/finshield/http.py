@@ -8,6 +8,8 @@ from typing import Any
 from .schema import _schemas
 
 ALL = "all"
+# "all" in x-groups = the five console groups. Staff (FinLend Ops) is only allowed on /staff/* (CHANGE-10).
+CONSOLE_GROUPS = {"Admin", "Analyst", "SecurityHead", "ComplianceHead", "Auditor"}
 
 
 class HttpError(Exception):
@@ -37,10 +39,12 @@ def caller(event) -> str:
 
 
 def require(event, allowed) -> None:
-    """allowed: list of group names, or ["all"] for any signed-in user."""
+    """allowed: list of group names, or ["all"] for any of the console groups (CONSOLE_GROUPS)."""
     if ALL in allowed:
         if not claims(event):
             raise HttpError(401, "UNAUTHORIZED", "sign-in required")
+        if not groups(event) & CONSOLE_GROUPS:
+            raise HttpError(403, "FORBIDDEN", f"needs one of the console groups {sorted(CONSOLE_GROUPS)}")
         return
     if not groups(event) & set(allowed):
         raise HttpError(403, "FORBIDDEN", f"needs one of the groups {sorted(allowed)}")

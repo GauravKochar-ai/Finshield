@@ -1,0 +1,12 @@
+{
+  "data": {
+    "user_id": "u-031",
+    "name_pseudo": "SAMPLE-Coll-031",
+    "team": "collections",
+    "role": "Collections Agent",
+    "access_scope": "ASSIGNED",
+    "default_purpose": "collections",
+    "containment": null
+  },
+  "error": null
+}

@@ -1,0 +1,11 @@
+{
+  "data": {
+    "file_id": "KYC-SELFIE-C-10001",
+    "s3_key": "kyc/C-10001/KYC-SELFIE-C-10001.png",
+    "url": "https://finshield-dev-kyc-docs.s3.ap-south-1.amazonaws.com/kyc/C-10001/KYC-SELFIE-C-10001.png?X-Amz-Signature=SAMPLE",
+    "method": "PUT",
+    "headers": { "content-type": "image/png" },
+    "expires_in": 300
+  },
+  "error": null
+}

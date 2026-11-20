@@ -226,6 +226,9 @@ Resources:
   GroupAdmin:
     Type: AWS::Cognito::UserPoolGroup
     Properties: { GroupName: Admin, UserPoolId: !Ref UserPool }
+  GroupStaff:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { GroupName: Staff, UserPoolId: !Ref UserPool, Description: FinLend Ops staff }
 
   Api:
     Type: AWS::Serverless::HttpApi
@@ -557,6 +560,9 @@ Resources:
       FunctionName: !Sub finshield-${Stage}-normalizer
       Description: "Normalize Raw Activity, CloudTrail, GuardDuty and Config events into the unified event (M3)"
       CodeUri: ../backend/functions/normalizer/
+      Environment:
+        Variables:
+          STAFF_APP_ROLE_ARN: !GetAtt StaffApiFunctionRole.Arn
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref EventsTable
@@ -1288,6 +1294,74 @@ Resources:
             ApiId: !Ref Api
             Method: GET
             Path: /v1/accuracy
+
+  StaffApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-staff-api
+      Description: "FinLend Ops staff routes (/v1/staff/*): customers, consent ledger view, KYC presigned view/download/upload, containment gate"
+      CodeUri: ../backend/functions/staff_api/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref KycFilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConsentTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref Bus
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+        - Statement:
+            - Sid: PresignKycObjects
+              Effect: Allow
+              Action: [s3:GetObject, s3:PutObject]
+              Resource: !Sub '${KycBucket.Arn}/kyc/*'
+            - Sid: KycBucketKmsKey
+              Effect: Allow
+              Action: [kms:Decrypt, kms:GenerateDataKey]
+              Resource: !GetAtt DataKey.Arn
+      Events:
+        Staff1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/staff/me
+        Staff2:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/staff/customers
+        Staff3:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/staff/customers/{id}
+        Staff4:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/staff/customers/{id}/consent
+        Staff5:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/staff/customers/{id}/kyc-upload
+        Staff6:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/staff/kyc/{id}/url
 
   # ===================== S3 buckets =====================
   KycBucket:

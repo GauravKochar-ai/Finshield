@@ -88,6 +88,12 @@ API_FIXTURES = {
     "api_simulate": ("/simulate", "post"),
     "api_accuracy_run": ("/accuracy/run", "post"),
     "api_accuracy": ("/accuracy", "get"),
+    "api_staff_me": ("/staff/me", "get"),
+    "api_staff_customers": ("/staff/customers", "get"),
+    "api_staff_customer": ("/staff/customers/{id}", "get"),
+    "api_staff_consent": ("/staff/customers/{id}/consent", "get"),
+    "api_staff_kyc_upload": ("/staff/customers/{id}/kyc-upload", "post"),
+    "api_staff_kyc_url": ("/staff/kyc/{id}/url", "post"),
 }
 
 
@@ -95,7 +101,7 @@ def test_every_openapi_operation_has_a_fixture():
     spec = _spec()
     ops = {(p, m) for p, item in spec["paths"].items() for m in item if m in ("get", "post")}
     assert ops == set(API_FIXTURES.values())
-    assert len(ops) == 20
+    assert len(ops) == 26
 
 
 @pytest.mark.parametrize("fixture,op", API_FIXTURES.items())

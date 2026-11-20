@@ -58,16 +58,17 @@ TEAMS = {
 # user_id: (team, downloads per active 15-min window = the p95 the baseline will show, home city, extras)
 USERS = {
     **{f"u-{n:03d}": ("ops", 1 if n % 2 else 2, "Mumbai", {}) for n in range(1, 9)},
-    "u-017": ("ops", 2, "Pune", {"is_admin": True, "role": "Ops Admin", "iam": "role/finshield-{stage}-demo-ops-admin"}),
+    "u-017": ("ops", 2, "Pune", {"is_admin": True, "role": "Ops Admin", "iam": "role/finshield-{stage}-demo-ops-admin",
+                                 "staff_email": "ops.admin@finlend.example"}),
     "u-018": ("ops", 2, "Pune", {"is_admin": True, "role": "Ops Admin"}),
     **{f"u-{n:03d}": ("kyc", 2 + n % 2, "Mumbai", {}) for n in (9, 10, 12, 13, 14, 15, 16)},
     "u-011": ("kyc", 4, "Mumbai", {}),
     **{f"u-{n:03d}": ("credit", 1 + n % 3, "Bengaluru", {}) for n in range(19, 25)},
-    "u-031": ("collections", 4, "Mumbai", {}),
+    "u-031": ("collections", 4, "Mumbai", {"staff_email": "collections.agent@finlend.example"}),
     "u-032": ("collections", 3, "Mumbai", {}),
     **{f"u-{n:03d}": ("collections", 3, "Pune", {}) for n in range(33, 37)},
     **{p: ("partner_lsp", 2, "Delhi", {"partner_id": pid}) for pid, ps in PARTNERS.items() for p in ps},
-    "u-037": ("marketing", 0, "Mumbai", {}),
+    "u-037": ("marketing", 0, "Mumbai", {"staff_email": "marketing.user@finlend.example"}),
     **{f"u-{n:03d}": ("marketing", 0, "Mumbai", {}) for n in (38, 39, 40)},
     "u-041": ("audit", 4, "Mumbai", {}),
     "u-042": ("audit", 4, "Mumbai", {}),
@@ -96,7 +97,7 @@ def h(s: str, n: int = 16) -> str:
 def make_users(account=ACCOUNT_PLACEHOLDER, stage="dev"):
     out = []
     for uid, (team, _p95, city, extra) in USERS.items():
-        label, role, scope, *_ = TEAMS[team]
+        label, role, scope, purpose, *_ = TEAMS[team]
         svc = team == "service"
         num = uid.split("-")[-1]
         iam = extra.get("iam", f"user/sample-{uid}").format(stage=stage)
@@ -107,6 +108,7 @@ def make_users(account=ACCOUNT_PLACEHOLDER, stage="dev"):
             "home_city": city, "devices": [f"srv-{uid}" if svc else f"d-{uid}"],
             "partner_id": extra.get("partner_id"), "access_scope": scope,
             "iam_principal_arn": f"arn:aws:iam::{account}:{iam}", "sample": True,
+            "staff_email": extra.get("staff_email"), "default_purpose": purpose,  # FinLend Ops persona (CHANGE-10)
         })
     return out
 
@@ -133,14 +135,28 @@ def consent_purposes(n: int):
     return purposes, withdrawn
 
 
+def kyc_manifest() -> dict[str, dict]:
+    """customer_id -> Roopak's manifest row (simulator/seed/kyc-docs/manifest.csv), empty when the file is absent."""
+    manifest = Path(__file__).resolve().parent / "kyc-docs" / "manifest.csv"
+    if not manifest.is_file():
+        return {}
+    with open(manifest, newline="", encoding="utf-8") as f:
+        return {r["customer_id"]: r for r in csv.DictReader(f) if r.get("customer_id")}
+
+
 def make_customers(now):
     rnd = random.Random(SEED + 1)
+    docs = kyc_manifest()
     out = []
     for n in range(CUSTOMER_FIRST, CUSTOMER_LAST + 1):
         agent, partner = agent_for(n)
+        city, last4 = rnd.choice(CITIES), f"{rnd.randint(0, 9999):04d}"
+        doc = docs.get(f"C-{n}") or {}
+        if doc.get("doc_type") == "AADHAAR" and doc.get("aadhaar_last4"):
+            last4 = doc["aadhaar_last4"]  # the record agrees with the card image
         out.append({
-            "customer_id": f"C-{n}", "city": rnd.choice(CITIES), "aadhaar_last4": f"{rnd.randint(0, 9999):04d}",
-            "pan_fake": f"FKPAN{n % 10000:04d}F", "loan_id": f"LN-SAMPLE-{n}", "assigned_agent": agent,
+            "customer_id": f"C-{n}", "city": city, "aadhaar_last4": last4,
+            "pan_fake": doc.get("pan_fake") or f"SAMPL{n % 10000:04d}A", "loan_id": f"LN-SAMPLE-{n}", "assigned_agent": agent,
             "partner_id": partner, "bank_account_hash": h(f"bank-{n}-{SEED}"),
             "bank_account_changed_at": iso(now - timedelta(days=60 + (n * 37) % 600)), "sample": True,
         })
@@ -406,8 +422,14 @@ def event_item(e):
     return item
 
 
-def load(data, stage):
+def load(data, stage, only=None):
+    """only: logical table names to write (e.g. ["Users", "Customers"]); None writes every table."""
     from finshield import ddb
+    if only:
+        unknown = sorted(set(only) - set(data))
+        if unknown:
+            raise SystemExit(f"--only: unknown tables {unknown}; choose from {sorted(data)}")
+        data = {k: v for k, v in data.items() if k in only}
     for logical in data:
         os.environ.setdefault(f"TABLE_{logical.upper()}", f"finshield-{stage}-{logical}")
     for logical, rows in data.items():
@@ -427,6 +449,7 @@ def main(argv=None):
     ap.add_argument("--now", help="ISO time used as 'now' (default: current time)")
     ap.add_argument("--account", help="AWS account id for ARNs (default: STS when --load, else placeholder)")
     ap.add_argument("--stage", default=os.environ.get("STAGE", "dev"))
+    ap.add_argument("--only", help="with --load: comma list of tables to write, e.g. Users,Customers (default: all)")
     a = ap.parse_args(argv)
     if not (a.out or a.load or a.scenarios):
         ap.error("give --out, --load and/or --scenarios")
@@ -451,7 +474,7 @@ def main(argv=None):
                 (d / f"{logical}.json").write_text(json.dumps(rows, separators=(",", ":")), encoding="utf-8")
             print("out: " + ", ".join(f"{k}={len(v)}" for k, v in data.items()) + f" -> {d}")
         if a.load:
-            load(data, a.stage)
+            load(data, a.stage, [t.strip() for t in a.only.split(",") if t.strip()] if a.only else None)
 
 
 if __name__ == "__main__":
