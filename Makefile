@@ -2,9 +2,12 @@
 STAGE      ?= dev
 REGION     ?= ap-south-1
 STACK      ?= finshield-$(STAGE)
-ALERT_EMAIL ?= alerts@example.com
+ALERT_EMAIL ?= keshav.sharma@globalnodes.ai
 MODE       ?= DRY_RUN
-MODEL_ID   ?= NONE
+MODEL_ID   ?= mistral.mistral-large-3-675b-instruct
+GUARDDUTY  ?= true
+CONFIG_RECORDER ?= true
+CONFIG_RULES ?= true
 PY         := $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python3)
 PIP        := $(PY) -m pip
 SAM        := $(shell test -x .venv/bin/sam && echo $(CURDIR)/.venv/bin/sam || echo sam)
@@ -16,7 +19,8 @@ export STACK STAGE REGION
 help:
 	@echo "make build               build layer + SAM artifacts"
 	@echo "make validate            sam validate --lint"
-	@echo "make deploy              deploy stack $(STACK) (ALERT_EMAIL=, MODE=LIVE|DRY_RUN, MODEL_ID=)"
+	@echo "make deploy              deploy stack $(STACK) (ALERT_EMAIL=, MODE=LIVE|DRY_RUN, MODEL_ID=,"
+	@echo "                          GUARDDUTY=, CONFIG_RECORDER=, CONFIG_RULES= true|false). SSM model/mode/email follow these."
 	@echo "make env                 write web/.env.local from stack outputs"
 	@echo "make seed                create Cognito demo users and load seed data"
 	@echo "make scenario SC=SC-01   replay a scenario"
@@ -44,7 +48,7 @@ validate:
 	cd infra && $(SAM) validate --template-file template.yaml --lint --region $(REGION)
 
 deploy: build
-	cd infra && $(SAM) deploy --stack-name $(STACK) --parameter-overrides Stage=$(STAGE) AlertEmail=$(ALERT_EMAIL) ContainmentMode=$(MODE) BedrockModelId=$(MODEL_ID) $(EXTRA_PARAMS)
+	cd infra && $(SAM) deploy --stack-name $(STACK) --parameter-overrides Stage=$(STAGE) AlertEmail=$(ALERT_EMAIL) ContainmentMode=$(MODE) BedrockModelId=$(MODEL_ID) CreateGuardDutyDetector=$(GUARDDUTY) CreateConfigRecorder=$(CONFIG_RECORDER) EnableConfigRules=$(CONFIG_RULES) $(EXTRA_PARAMS)
 
 env:
 	./scripts/write-env.sh

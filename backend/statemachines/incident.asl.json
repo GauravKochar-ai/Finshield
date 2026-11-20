@@ -370,7 +370,7 @@
                   "BackoffRate": 2
                 }
               ],
-              "TimeoutSeconds": 8,
+              "TimeoutSeconds": 25,
               "Catch": [
                 {
                   "ErrorEquals": [
@@ -928,7 +928,7 @@
           "BackoffRate": 2
         }
       ],
-      "TimeoutSeconds": 8,
+      "TimeoutSeconds": 25,
       "Catch": [
         {
           "ErrorEquals": [
@@ -1050,7 +1050,7 @@
           "BackoffRate": 2
         }
       ],
-      "TimeoutSeconds": 8,
+      "TimeoutSeconds": 25,
       "Catch": [
         {
           "ErrorEquals": [

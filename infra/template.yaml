@@ -897,12 +897,17 @@ Resources:
       Description: "Bedrock explanation with number check and template fallback (M5)"
       CodeUri: ../backend/functions/ai_explain/
       Timeout: 60
+      Environment:
+        Variables:
+          AI_BUDGET_S: '20'
       Policies:
         - Statement:
             - Sid: BedrockConverse
               Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
-              Resource: '*'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${Guardrail.GuardrailId}'
         - DynamoDBCrudPolicy:
             TableName: !Ref AlertsTable
         - Statement:
@@ -921,13 +926,15 @@ Resources:
       FunctionName: !Sub finshield-${Stage}-ai-reports
       Description: "Four report drafts (M5)"
       CodeUri: ../backend/functions/ai_reports/
-      Timeout: 60
+      Timeout: 150
       Policies:
         - Statement:
             - Sid: BedrockConverse
               Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
-              Resource: '*'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${Guardrail.GuardrailId}'
         - DynamoDBReadPolicy:
             TableName: !Ref AlertsTable
         - DynamoDBCrudPolicy:
@@ -954,7 +961,9 @@ Resources:
             - Sid: BedrockConverse
               Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
-              Resource: '*'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${Guardrail.GuardrailId}'
         - DynamoDBReadPolicy:
             TableName: !Ref AlertsTable
         - DynamoDBReadPolicy:
@@ -983,7 +992,9 @@ Resources:
             - Sid: BedrockConverse
               Effect: Allow
               Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
-              Resource: '*'
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${Guardrail.GuardrailId}'
         - S3ReadPolicy:
             BucketName: !Ref KycBucket
         - DynamoDBCrudPolicy:
@@ -1009,7 +1020,23 @@ Resources:
       FunctionName: !Sub finshield-${Stage}-simulator
       Description: "Replay a scenario with timestamps rewritten to now, or reset (M7)"
       CodeUri: ../backend/functions/simulator/
+      Environment:
+        Variables:
+          RELEASE_FUNCTION_NAME: !Sub 'finshield-${Stage}-release'
       Policies:
+        - Statement:
+            - Sid: InvokeReleaseOnReset
+              Effect: Allow
+              Action: [lambda:InvokeFunction]
+              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:finshield-${Stage}-release'
+            - Sid: GuardDutyListDetectors
+              Effect: Allow
+              Action: [guardduty:ListDetectors]
+              Resource: '*'
+            - Sid: GuardDutySampleFindings
+              Effect: Allow
+              Action: [guardduty:CreateSampleFindings]
+              Resource: !Sub 'arn:${AWS::Partition}:guardduty:${AWS::Region}:${AWS::AccountId}:detector/*'
         - EventBridgePutEventsPolicy:
             EventBusName: !Ref Bus
         - DynamoDBCrudPolicy:
@@ -1527,10 +1554,14 @@ Resources:
     Condition: CreateRecorder
     Properties:
       RoleARN: !GetAtt ConfigRole.Arn
-      RecordingGroup: { AllSupported: true, IncludeGlobalResourceTypes: true }
+      RecordingGroup:   # scoped to what the 3 rules evaluate (cost)
+        AllSupported: false
+        IncludeGlobalResourceTypes: false
+        ResourceTypes: ['AWS::S3::Bucket', 'AWS::IAM::User', 'AWS::CloudTrail::Trail']
   ConfigDeliveryChannel:
     Type: AWS::Config::DeliveryChannel
     Condition: CreateRecorder
+    DependsOn: ConfigRecorder
     Properties:
       S3BucketName: !Ref ConfigBucket
   ConfigRuleS3Public:
