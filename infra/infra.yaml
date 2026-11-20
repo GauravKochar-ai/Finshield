@@ -13,8 +13,202 @@ Parameters:
     Type: Number
     Default: 180
     Description: CloudWatch log retention (CERT-In requires 180 days of logs)
+  UseKmsForAadhaar:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: true = Aadhaar bucket uses its own KMS key (alias/fs-kyc-aadhaar). Set false if KMS is blocked in the sandbox (falls back to SSE-S3).
+
+Conditions:
+  UseKms: !Equals [!Ref UseKmsForAadhaar, "true"]
 
 Resources:
+  # ============================================================ KYC DOCUMENT STORE
+  # ------------------------------------------ KMS key for the Aadhaar bucket
+  AadhaarKmsKey:
+    Type: AWS::KMS::Key
+    Condition: UseKms
+    Properties:
+      Description: FinShield AI - key for the synthetic Aadhaar KYC document bucket
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+      Tags:
+        - { Key: project, Value: finshield-ai }
+        - { Key: data-class, Value: kyc-aadhaar }
+        - { Key: synthetic, Value: "true" }
+
+  AadhaarKmsAlias:
+    Type: AWS::KMS::Alias
+    Condition: UseKms
+    Properties:
+      AliasName: alias/fs-kyc-aadhaar
+      TargetKeyId: !Ref AadhaarKmsKey
+
+  # ------------------------------------------ KYC buckets (synthetic data only)
+  KycAadhaarBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "fs-kyc-aadhaar-${AWS::AccountId}-${AWS::Region}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - !If
+            - UseKms
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: aws:kms
+                KMSMasterKeyID: !GetAtt AadhaarKmsKey.Arn
+              BucketKeyEnabled: true
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+      Tags:
+        - { Key: project, Value: finshield-ai }
+        - { Key: data-class, Value: kyc-aadhaar }
+        - { Key: synthetic, Value: "true" }
+
+  KycAadhaarBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref KycAadhaarBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt KycAadhaarBucket.Arn
+              - !Sub "${KycAadhaarBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  KycPanBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "fs-kyc-pan-${AWS::AccountId}-${AWS::Region}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - { Key: project, Value: finshield-ai }
+        - { Key: data-class, Value: kyc-pan }
+        - { Key: synthetic, Value: "true" }
+
+  KycPanBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref KycPanBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt KycPanBucket.Arn
+              - !Sub "${KycPanBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  KycVoterBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "fs-kyc-voter-${AWS::AccountId}-${AWS::Region}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - { Key: project, Value: finshield-ai }
+        - { Key: data-class, Value: kyc-voter }
+        - { Key: synthetic, Value: "true" }
+
+  KycVoterBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref KycVoterBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt KycVoterBucket.Arn
+              - !Sub "${KycVoterBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ------------------------------------------ KYC document index table
+  KycDocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: fs-kyc-documents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: customer_id, AttributeType: S }
+        - { AttributeName: document_type, AttributeType: S }
+        - { AttributeName: data_category, AttributeType: S }
+      KeySchema:
+        - { AttributeName: customer_id, KeyType: HASH }
+        - { AttributeName: document_type, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: by-category
+          KeySchema:
+            - { AttributeName: data_category, KeyType: HASH }
+            - { AttributeName: customer_id, KeyType: RANGE }
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - { Key: project, Value: finshield-ai }
+
+  # ============================================================ EXISTING (logs, cases, alerts)
   # ------------------------------------------------------------- S3 buckets
   RawLogsBucket:
     Type: AWS::S3::Bucket
@@ -185,3 +379,26 @@ Outputs:
   AlertsTopicArn:
     Value: !Ref AlertsTopic
     Export: { Name: fs-infra-AlertsTopicArn }
+  KycAadhaarBucketName:
+    Value: !Ref KycAadhaarBucket
+    Export: { Name: fs-infra-KycAadhaarBucketName }
+  KycPanBucketName:
+    Value: !Ref KycPanBucket
+    Export: { Name: fs-infra-KycPanBucketName }
+  KycVoterBucketName:
+    Value: !Ref KycVoterBucket
+    Export: { Name: fs-infra-KycVoterBucketName }
+  KycDocumentsTableName:
+    Value: !Ref KycDocumentsTable
+    Export: { Name: fs-infra-KycDocumentsTableName }
+  KycDocumentsByCategoryIndex:
+    Value: by-category
+  AadhaarEncryption:
+    Value: !If [UseKms, "SSE-KMS (alias/fs-kyc-aadhaar, rotation on, bucket key on)", "SSE-S3 (AES-256) - KMS fallback"]
+  AadhaarKmsKeyArn:
+    Condition: UseKms
+    Value: !GetAtt AadhaarKmsKey.Arn
+    Export: { Name: fs-infra-AadhaarKmsKeyArn }
+  AadhaarKmsAlias:
+    Condition: UseKms
+    Value: alias/fs-kyc-aadhaar
