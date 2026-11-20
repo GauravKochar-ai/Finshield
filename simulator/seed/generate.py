@@ -414,7 +414,8 @@ def load(data, stage):
         tbl = ddb.table(logical)
         with tbl.batch_writer(overwrite_by_pkeys=["user_id", "sk"] if logical == "Events" else None) as bw:
             for r in rows:
-                bw.put_item(Item=ddb.to_ddb(event_item(r) if logical == "Events" else r))
+                row = event_item(r) if logical == "Events" else {k: v for k, v in r.items() if v is not None}
+                bw.put_item(Item=ddb.to_ddb(row))  # null attributes left out: GSI keys must not be NULL
         print(f"{logical}: {len(rows)} rows -> {ddb.table_name(logical)}")
 
 

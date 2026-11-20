@@ -1,8 +1,48 @@
-# Integration guide: M3 detection Lambdas
+# Integration guide: FinShield backend (all 21 Lambdas)
 
-Owner: aekanshu (M3). Read this, or give it to your AI assistant, to connect to the detection pipeline.
+Read this, or give it to your AI assistant, to connect to the backend. Everything below is deployed and checked live
+(`scripts/live_check.py`: 31 of 31 checks pass, see section 0).
 Source of truth for shapes: `contract/schemas/*.schema.json`, `contract/openapi.yaml`, `contract/config.json`.
 All data is synthetic and marked SAMPLE. Region `ap-south-1`, stage `dev`, every name is `finshield-dev-<name>`.
+
+## 0. Live stack (dev)
+
+| Thing | Value |
+|---|---|
+| API base URL | `https://510zooztrb.execute-api.ap-south-1.amazonaws.com/v1` (stack output `ApiUrl`) |
+| Cognito | user pool `ap-south-1_MQMLjcJDR`, app client `3k1fbjpacdn76s10tib9vbcpu1`, flow `USER_PASSWORD_AUTH` or SRP |
+| Demo logins | `admin@`, `analyst@`, `securityhead@`, `compliancehead@`, `auditor@finshield.example` (password in `scripts/seed.sh`) |
+| Groups | Admin, Analyst, SecurityHead, ComplianceHead, Auditor (read-only) |
+| Auth header | `Authorization: <Cognito ID token>` on every call |
+| Envelope | every response is `{"data": ..., "error": null}` or `{"data": null, "error": {"code", "message"}}` |
+| Web | `https://djr2m04eyaclp.cloudfront.net` |
+| Settings | SSM `/finshield/dev/containment_mode` (DRY_RUN now), `/finshield/dev/bedrock_model_id` (NONE now) |
+
+Check everything in one go: `AWS_PROFILE=<profile> python3 scripts/live_check.py`.
+
+### All 21 Lambdas
+
+| Lambda | Trigger | What it does | Built by |
+|---|---|---|---|
+| normalizer | bus: Raw Activity, CloudTrail, GuardDuty, Config | any source -> unified event, dedup, raw archive, Posture | aekanshu |
+| detection | bus: Normalized Event | counters, signs S1-S11, one alert per user, Alert Raised | aekanshu |
+| baseline | hourly + direct invoke | normal p95 per user and team | aekanshu |
+| simulator | `POST /v1/simulate` | replay a scenario, reset | aekanshu |
+| test_runner | `POST /v1/accuracy/run` | 11 scenarios + 7 normal days -> AccuracyRuns | aekanshu |
+| api | 14 GET/POST routes (section 3b) | read API on the live tables, approvals | aekanshu |
+| decision | Step Functions + `POST /v1/alerts/{id}/decision` | stores the approval token, sends the CISO decision back | aekanshu |
+| quarantine | Step Functions (after APPROVE) | deny-all policy on the principal | aekanshu |
+| release | `POST /v1/alerts/{id}/release` | undoes every containment step | aekanshu |
+| tamper_demo | `POST /v1/alerts/{id}/evidence/tamper-demo` | breaks a copy of the chain to show verify works | aekanshu |
+| ai_reports | Step Functions (async) | 4 report drafts (Bedrock or template) | aekanshu |
+| ask | `POST /v1/alerts/{id}/ask` | Ask FinShield answer from the alert facts | aekanshu |
+| kyc_label | S3 Object Created on the KYC bucket | labels the file, flags full Aadhaar, KYC_FILE_UPLOADED event | aekanshu |
+| start_incident | bus: Alert Raised | starts Step Functions `<alert_id>-<severity>` | Keshav |
+| set_deadlines | Step Functions | RBI / CERT-In / DPB timers | Keshav |
+| evidence | Step Functions | hash-chained evidence append, export | Keshav |
+| contain_revoke_sessions, contain_deactivate_keys, contain_bucket_deny, contain_dns_block | Step Functions (CRITICAL) | containment, LIVE or DRY_RUN | Keshav |
+| ai_explain | Step Functions | Bedrock explanation with number check, template fallback | Keshav |
+
 
 ## 1. The pipeline in one picture
 
@@ -21,7 +61,7 @@ simulator / app / CloudTrail / GuardDuty / Config
 
 `baseline` runs every hour and writes the Baselines table. `test_runner` measures accuracy and writes AccuracyRuns.
 
-## 2. The five Lambdas
+## 2. Detection Lambdas (pipeline)
 
 | Lambda | How to call it | Input | Output |
 |---|---|---|---|
@@ -31,7 +71,7 @@ simulator / app / CloudTrail / GuardDuty / Config
 | `finshield-dev-simulator` | `POST /v1/simulate` (Admin), or direct invoke | `{"scenario_id":"SC-01"}` or `{"reset":true}` | events sent to the bus |
 | `finshield-dev-test-runner` | `POST /v1/accuracy/run` (Admin), or direct invoke `{}` | none | accuracy result + AccuracyRuns rows |
 
-## 3. HTTP endpoints (frontend)
+## 3. Simulator and accuracy endpoints
 
 Base URL: stack output `ApiUrl` (already ends in `/v1`). Send the Cognito ID token as `Authorization: Bearer <token>`.
 Both routes need the user to be in the **Admin** group. Responses use the envelope `{"data": ..., "error": null}`.
@@ -62,6 +102,43 @@ POST /v1/accuracy/run
  "error": null}
 ```
 `time_to_alert_ms` is null for logged-only scenarios (no alert by design).
+
+## 3b. Read and action endpoints (api, decision, release, ask, tamper_demo)
+
+All under the API base URL, all in the envelope. "all" = any signed-in group.
+
+| Method and path | Groups | Returns |
+|---|---|---|
+| GET `/posture` | all | `{posture_score, alerts_by_severity, config_results[], consent_risks, deadlines_due_soon[]}` |
+| GET `/alerts?status=&severity=` | all | alert list (alert.schema.json), newest first, max 100 |
+| GET `/alerts/{id}` | all | one alert: signals with facts, deadlines, containment, ai, ai_status, execution_arn |
+| GET `/alerts/{id}/timeline` | all | the events that built the alert (event.schema.json), oldest first |
+| GET `/alerts/{id}/evidence` | all | evidence chain entries `{seq, ts, type, actor, payload, prev_hash, hash}` |
+| POST `/alerts/{id}/evidence/verify` | all | `{valid, broken_at_seq}` |
+| POST `/alerts/{id}/evidence/tamper-demo` | Admin | `{valid: false, broken_at_seq}` from an edited copy; the real chain is untouched. Optional body `{"seq": 3}` |
+| POST `/alerts/{id}/decision` | SecurityHead, ComplianceHead | body `{"decision":"APPROVE"|"REJECT","reason":"..."}` -> `{alert_id, decision, status}`. 409 `NO_PENDING_APPROVAL` if the alert is not waiting |
+| POST `/alerts/{id}/release` | SecurityHead | `{alert_id, status: "RELEASED", released: [{action, mode, result}]}`. 409 if already released |
+| GET `/alerts/{id}/reports` | all | 4 drafts `{report_type: RBI_INCIDENT|CERTIN_FORM|DPB_NOTICE|CUSTOMER_NOTICE, status: DRAFT|FALLBACK, body_md, model_id, generated_at}` (appear about 5-20 s after a CRITICAL alert) |
+| POST `/alerts/{id}/ask` | Analyst, SecurityHead, ComplianceHead, Admin | body `{"question":"..."}` -> `{answer, sources[]}` |
+| GET `/users/{id}` | all | profile (name_pseudo only), baseline, recent_risk[] |
+| GET `/rules` | all | contents of contract/config.json |
+| GET `/compliance` | all | control map `[{control_id, obligation, finshield_control, evidence, screen, status, verify_clause}]` |
+| GET `/privacy` | all | `{consent_risks[], unmasked_aadhaar_files[], purpose_mismatches[]}` |
+| GET `/approvals`, POST `/approvals` | SecurityHead | tickets and jobs; POST body `{type: ticket|scheduled_job|emergency_access, subject_id, valid_from, valid_to, max_files?, data_class?, window_start?, window_end?}` -> created row with `approval_id` |
+| GET `/accuracy` | Admin | latest accuracy run (same shape as POST /accuracy/run) |
+
+Errors: 400 BAD_REQUEST, 401 UNAUTHORIZED (no token), 403 FORBIDDEN (wrong group), 404 NOT_FOUND, 409 conflict codes above.
+
+### The SC-01 story the UI can click through (all verified live)
+
+1. Admin: `POST /simulate {"scenario_id":"SC-01"}`. Within about 6 s `GET /alerts?severity=CRITICAL` shows u-017, score 96.
+2. The workflow runs on its own: status OPEN -> CONTAINED -> AWAITING_APPROVAL (about 10-30 s). `containment[]` shows
+   REVOKE_SESSIONS, DEACTIVATE_KEYS (NOT_APPLICABLE for a role), BUCKET_DENY, DNS_BLOCK. `ai` is filled
+   (`ai_status` FALLBACK while Bedrock is off). `GET /reports` returns 4 drafts.
+3. SecurityHead: `POST /alerts/{id}/decision {"decision":"APPROVE","reason":"..."}` -> status LOCKED; the workflow
+   quarantines the principal and seals the evidence. No decision in 30 min -> escalated to ComplianceHead.
+4. `POST /evidence/verify` -> valid. Admin: `POST /evidence/tamper-demo` -> broken at a seq; verify again -> still valid.
+5. SecurityHead: `POST /alerts/{id}/release` -> RELEASED (every containment step undone).
 
 ## 4. Scenarios (list them in the Simulator panel)
 
@@ -170,6 +247,8 @@ GuardDuty findings are normalized but not scored.
 
 ## 8. Run it
 
+`python3 scripts/live_check.py` runs every check above against the deployed stack.
+
 ```bash
 make deploy                 # build layer + SAM deploy
 make seed                   # Cognito demo users + seed data (simulator/seed/generate.py --load)
@@ -181,6 +260,13 @@ Seed JSON for tests or mocks: `python3 simulator/seed/generate.py --out build/se
 Tests: `make test` (fast); `RUN_SLOW=1 make test` replays every scenario through mocked AWS.
 
 ## 9. Known limits
+
+- Bedrock is off (`bedrock_model_id = NONE`): ai_explain, ai_reports and ask answer from templates built on the same facts.
+  Set the SSM value to an enabled model (for example an Anthropic Haiku model in this account) to switch the AI on; no deploy.
+  Bedrock never computes a score: code computes every number, the AI only writes words and is rejected if it invents a number.
+- Containment and quarantine run in DRY_RUN (they record the exact IAM/S3 call in evidence). LIVE needs SSM
+  `containment_mode = LIVE` and only ever touches `finshield-dev-demo-*` principals.
+- kyc_label reads the document type from the key; with Bedrock on it also looks at the image for a full Aadhaar number.
 
 - `TimeToDetectMs` (CloudWatch, namespace FinShield) is now minus the event's `ts`. Simulated events keep the scenario's
   clock time, so for replays it can show hours. Use `time_to_alert_ms` from the accuracy run for the "under 60 s" check.
