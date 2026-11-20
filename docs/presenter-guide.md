@@ -8,7 +8,7 @@ on 20 Nov 2026. All data is synthetic and marked SAMPLE.
 | App | Link | Sign in as | Use it for |
 | --- | --- | --- | --- |
 | Admin console | https://djr2m04eyaclp.cloudfront.net | `securityhead@finshield.example` | Alerts, approve, release, evidence, reports, compliance |
-| Simulator | https://d3ldrhishawn1p.cloudfront.net | `admin@finshield.example` | Run the 5 demo scenarios, reset, GuardDuty sample |
+| Simulator | https://d1rrgk7c2l6zwn.cloudfront.net | `admin@finshield.example` | Run the 5 demo scenarios, reset, GuardDuty sample |
 
 Other console logins: `analyst@`, `compliancehead@`, `auditor@finshield.example`. The demo password is in `scripts/seed.sh`.
 
