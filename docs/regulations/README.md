@@ -5,7 +5,7 @@ One file per regulation. Each row has: clause ID, plain summary, why it matters 
 | File | Regulation | Status |
 |---|---|---|
 | [dpdp-act-2023-and-rules-2025.md](dpdp-act-2023-and-rules-2025.md) | DPDP Act 2023 + DPDP Rules 2025 (phasing dates) | Verified on meity.gov.in |
-| [rbi-digital-lending.md](rbi-digital-lending.md) | RBI Digital Lending (2025 Directions, now NBFC Credit Facilities Directions 2025, Ch. III) | Verified on rbi.org.in (1 row "verify") |
+| [rbi-digital-lending.md](rbi-digital-lending.md) | RBI Digital Lending (2025 Directions, now NBFC Credit Facilities Directions 2025, Ch. III) | Verified on rbi.org.in |
 | [rbi-it-governance-cyber-nbfc.md](rbi-it-governance-cyber-nbfc.md) | RBI IT governance and cyber security directions for NBFCs (2023 MD, now NBFC Cybersecurity Directions 2026) | Verified on rbi.org.in |
 | [rbi-it-outsourcing.md](rbi-it-outsourcing.md) | RBI IT outsourcing directions (2023 MD, now NBFC Managing Risks in Outsourcing Directions 2025, Ch. IV) | Verified on rbi.org.in |
 | [cert-in-directions-2022.md](cert-in-directions-2022.md) | CERT-In Directions, 28 April 2022 | Verified on cert-in.org.in |

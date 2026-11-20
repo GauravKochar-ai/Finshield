@@ -8,7 +8,7 @@
 
 In the deck and prompts, cite **"RBI NBFC Credit Facilities Directions 2025, Ch. III (Digital Lending), para X"**. Use the old numbering only when describing history.
 
-Checked against rbi.org.in on 2026-11-20 by M8. Quotes are from the NBFC Direction (id=12957).
+Checked against rbi.org.in on 2026-11-20 by M8. Quotes are from the NBFC Direction (id=12957). All rows verified.
 
 | Clause ID (NBFC Dir.) | Old 2025 para | Plain summary | Why it matters to a digital lender | FinShield control | Source | Verified |
 |---|---|---|---|---|---|---|
@@ -18,7 +18,7 @@ Checked against rbi.org.in on 2026-11-20 by M8. Quotes are from the NBFC Directi
 | Para 12(1)–(4) | 11(i)–(iv) | The lender and any LSP facing borrowers must name nodal grievance redressal officers, publish them on the website, the DLA and the KFS, and allow escalation to the RBI Ombudsman after 30 days. | Breach-affected borrowers will complain. Someone must own the response. | Customer notice draft includes the grievance contact field | id=12957 | yes |
 | Para 13(1) | 12(i) | Data collected by the lender's or LSP's app must be need-based, with the borrower's **prior and explicit consent**, and with an audit trail. No access to files and media, contacts, call logs or telephony. Camera, microphone and location only once, for onboarding/KYC. | Every KYC data point needs consent with an audit trail. | Consent ledger (purpose per customer), evidence chain | id=12957 | yes |
 | Para 13(2) | 12(ii) | The borrower can revoke consent and ask for their data to be deleted or forgotten. | Withdrawn consent must stop further use. | Consent ledger tracks withdrawn consents; Privacy screen "withdrawn consents accessed" | id=12957 | yes |
-| Para 13(3) | 12(iii) | Disclose the purpose of consent at each stage of interface. | Purpose limitation: KYC for a loan is not for marketing (SC-07). | Signal S9 (purpose mismatch) | id=12848 (old text); NBFC wording not checked separately | verify |
+| Para 13(3) | 12(iii) | Disclose the purpose of consent at each stage of interface. | Purpose limitation: KYC for a loan is not for marketing (SC-07). | Signal S9 (purpose mismatch) | id=12957 | yes |
 | Para 14(1) | 13(i) | LSPs may store only basic minimal data (name, address, contact). The lender is responsible for data privacy and security. | LSPs should not be holding KYC files. If they access them, it is a red flag. | Signal S1/S7 on LSP principals | id=12957 | yes |
 | Para 14(2) | 13(ii) | Publish a data-storage policy covering retention, destruction and "standards for handling security breach". | The breach-handling standard has to exist on paper. FinShield's playbook is the operational version. | Step Functions incident playbook | id=12957 | yes |
 | Para 14(3) | 13(iii) | Do not store or collect biometric data unless statute allows it. | Limits what the KYC store may contain. | Aadhaar last-4 only (Aadhaar vault assumption) | id=12957 | yes |
