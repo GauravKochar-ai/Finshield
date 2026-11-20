@@ -257,6 +257,10 @@ make accuracy               # 11 of 11, 0 false alerts
 make logs FN=detection      # tail logs
 ```
 Seed JSON for tests or mocks: `python3 simulator/seed/generate.py --out build/seed`.
+KYC files: `simulator/seed/kyc-docs/manifest.csv` (Roopak, 200 real SAMPLE images in `s3://finshield-dev-kyc-docs/kyc/`):
+80 PAN, 90 AADHAAR (C-10161..C-10170 have `unmasked_aadhaar_flag = true`, shown on `GET /privacy`), 30 SELFIE.
+Those rows have `in_bucket = true`; the other customers' KycFiles rows are metadata only. Customers C-10001..C-10200
+take `aadhaar_last4` and `pan_fake` from the manifest. `synthetic_name` is never stored (pseudonyms only).
 Tests: `make test` (fast); `RUN_SLOW=1 make test` replays every scenario through mocked AWS.
 
 ## 9. Known limits

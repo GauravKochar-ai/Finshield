@@ -144,27 +144,42 @@ def make_customers(now):
             "partner_id": partner, "bank_account_hash": h(f"bank-{n}-{SEED}"),
             "bank_account_changed_at": iso(now - timedelta(days=60 + (n * 37) % 600)), "sample": True,
         })
+    by_id = {c["customer_id"]: c for c in out}
+    for r in read_manifest():  # the real sample files carry their own last-4 and fake PAN
+        c = by_id.get(r["customer_id"])
+        if c:
+            if r.get("aadhaar_last4"):
+                c["aadhaar_last4"] = r["aadhaar_last4"]
+            if r.get("pan_fake"):
+                c["pan_fake"] = r["pan_fake"]
     return out
 
 
+MANIFEST = Path(__file__).resolve().parent / "kyc-docs" / "manifest.csv"
+
+
+def read_manifest():
+    """Roopak's manifest of the 200 real SAMPLE files in the KYC bucket. synthetic_name is never stored (pseudonyms only)."""
+    if not MANIFEST.is_file():
+        return []
+    with open(MANIFEST, newline="", encoding="utf-8") as f:
+        return [r for r in csv.DictReader(f) if r.get("file_id")]
+
+
 def make_kyc_files(customers):
-    manifest = Path(__file__).resolve().parent / "kyc-docs" / "manifest.csv"
-    if manifest.is_file():  # Roopak's manifest of the real sample files, when present
-        rows = []
-        with open(manifest, newline="", encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                key = r.get("s3_key") or r.get("key")
-                name = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-                parts = name.split("-")
-                rows.append({"file_id": r.get("file_id") or name, "customer_id": r.get("customer_id") or "-".join(parts[-2:]),
-                             "doc_type": r.get("doc_type") or parts[1], "s3_key": key, "size_kb": int(r.get("size_kb") or 0),
-                             "ai_label": None, "unmasked_aadhaar_flag": False, "sample": True})
-        return rows
+    """Metadata for 4 documents per customer (same key pattern), then the manifest rows replace their file_ids."""
     rnd = random.Random(SEED + 2)
-    return [{"file_id": f"KYC-{d}-{c['customer_id']}", "customer_id": c["customer_id"], "doc_type": d,
-             "s3_key": f"kyc/{c['customer_id']}/KYC-{d}-{c['customer_id']}.png", "size_kb": rnd.randint(80, 900),
-             "ai_label": None, "unmasked_aadhaar_flag": False, "sample": True}
-            for c in customers for d in DOC_TYPES]
+    rows = {f"KYC-{d}-{c['customer_id']}": {
+        "file_id": f"KYC-{d}-{c['customer_id']}", "customer_id": c["customer_id"], "doc_type": d,
+        "s3_key": f"kyc/{c['customer_id']}/KYC-{d}-{c['customer_id']}.png", "size_kb": rnd.randint(80, 900),
+        "ai_label": None, "unmasked_aadhaar_flag": False, "in_bucket": False, "sample": True}
+        for c in customers for d in DOC_TYPES}
+    for r in read_manifest():
+        rows[r["file_id"]] = {"file_id": r["file_id"], "customer_id": r["customer_id"], "doc_type": r["doc_type"],
+                              "s3_key": r["s3_key"], "size_kb": float(r["size_kb"] or 0), "ai_label": None,
+                              "unmasked_aadhaar_flag": r.get("unmasked_aadhaar", "").strip().lower() == "true",
+                              "in_bucket": True, "sample": True}
+    return list(rows.values())
 
 
 def make_consent(now):

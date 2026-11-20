@@ -54,8 +54,11 @@ def label(bucket, key, size=None):
             ai_label, flag, source = v.get("doc_type") or doc, bool(v.get("full_aadhaar_visible")), "bedrock"
     except Exception as exc:  # never block the upload on AI
         log("vision label failed, using the key", level="WARNING", key=key, error=str(exc)[:200])
-    row = {"file_id": fid, "customer_id": cid, "doc_type": doc, "s3_key": key, "ai_label": ai_label,
-           "unmasked_aadhaar_flag": flag, "label_source": source, "sample": True}
+    known = ddb.get_item("KycFiles", {"file_id": fid}) or {}
+    if source == "key":  # no vision result: keep a flag the seed manifest already set
+        flag = bool(known.get("unmasked_aadhaar_flag"))
+    row = {**known, "file_id": fid, "customer_id": cid, "doc_type": doc, "s3_key": key, "ai_label": ai_label,
+           "unmasked_aadhaar_flag": flag, "label_source": source, "in_bucket": True, "sample": True}
     if size:
         row["size_kb"] = int(size) // 1024
     ddb.put_item("KycFiles", row)
