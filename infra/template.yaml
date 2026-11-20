@@ -1007,6 +1007,9 @@ Resources:
       Description: "Advisory Bedrock tasks: second opinion, containment advice, compliance map, digest. Never changes score or containment."
       CodeUri: ../backend/functions/ai_suggest/
       Timeout: 60
+      Environment:
+        Variables:
+          SLACK_NOTIFY_FN: !Ref SlackNotifyFunction
       Policies:
         - Statement:
             - Sid: BedrockConverse
@@ -1019,6 +1022,8 @@ Resources:
             TableName: !Ref AlertsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AiSuggestionsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SlackNotifyFunction
         - SSMParameterReadPolicy:
             ParameterName: !Sub 'finshield/${Stage}/*'
       Events:
@@ -1036,9 +1041,9 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub finshield-${Stage}-slack-notify
-      Description: "Formatted Slack messages: detection on Alert Raised, AI analysis on AWAITING_APPROVAL. Off until SSM slack_webhook_url is set."
+      Description: "Formatted Slack messages: detection on Alert Raised, AI analysis when ai_suggest finishes. Off until SSM slack_webhook_url is set."
       CodeUri: ../backend/functions/slack_notify/
-      Timeout: 30
+      Timeout: 60
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AlertsTable
@@ -1052,11 +1057,6 @@ Resources:
           Properties:
             EventBusName: !Ref Bus
             Pattern: {"detail-type": ["Alert Raised"]}
-        AwaitingApprovalRule:
-          Type: EventBridgeRule
-          Properties:
-            EventBusName: !Ref Bus
-            Pattern: {"detail-type": ["Incident Updated"], "detail": {"status": ["AWAITING_APPROVAL"]}}
   KycLabelFunction:
     Type: AWS::Serverless::Function
     Properties:

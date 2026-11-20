@@ -60,29 +60,58 @@ def test_missing_alert_skips(fn, monkeypatch):
     ev["detail"]["alert_id"] = "ALR-NOPE"
     assert fn.handler(ev)["reason"] == "alert not found"
 def ai_event():
-    return {"detail-type": "Incident Updated", "detail": {"alert_id": AID, "status": "AWAITING_APPROVAL", "step": "awaitingapproval"}}
-def test_ai_message_content_and_idempotency(fn, monkeypatch):
-    monkeypatch.setenv("FINSHIELD_SETTING_SLACK_WEBHOOK_URL", URL)
-    monkeypatch.setattr(fn, "ADVICE_WAIT_S", 0)
-    ddb.put_item("AiSuggestions", {"alert_id": AID, "task": "SECOND_OPINION", "status": "OK", "output": {"risk_rating": "CRITICAL", "reasoning": "Bulk export and no approval.", "agrees_with_score": True, "computed_severity": "CRITICAL"}})
-    ddb.put_item("AiSuggestions", {"alert_id": AID, "task": "CONTAINMENT_ADVICE", "status": "OK", "output": {"actions": [{"action": "DNS_BLOCK", "reason": "Stops the upload destination."}]}})
+    return {"ai_followup": True, "alert_id": AID, "severity": "CRITICAL", "score": 96}
+def put_suggestions(score=96):
+    ddb.put_item("AiSuggestions", {"alert_id": AID, "task": "SECOND_OPINION", "status": "OK", "score": score, "output": {"risk_rating": "CRITICAL", "reasoning": "Bulk export and no approval.", "missed_considerations": ["Check other users on the same device"], "agrees_with_score": True, "computed_severity": "CRITICAL"}})
+    ddb.put_item("AiSuggestions", {"alert_id": AID, "task": "CONTAINMENT_ADVICE", "status": "OK", "score": score, "output": {"actions": [{"action": "DNS_BLOCK", "reason": "Stops the upload destination."}]}})
+    ddb.put_item("AiSuggestions", {"alert_id": AID, "task": "COMPLIANCE_MAP", "status": "OK", "score": score, "output": {"controls": [{"regulation": "RBI IT governance and cyber security directions for NBFCs", "clause": "Privileged access and incident reporting", "gap": "Emergency role used without approval.", "suggested_control": "Require a covering approval before the role can be assumed."}]}})
+def with_ai():
     a = ddb.get_item("Alerts", {"alert_id": AID})
     a["ai"] = fixture("alert_sc01")["ai"]
     a["ai_status"] = "OK"
     ddb.put_item("Alerts", a)
-    assert fn.handler(ai_event())["kind"] == "SLACK_AI"
+    return a
+def test_ai_message_has_all_three_suggestions(fn, monkeypatch):
+    monkeypatch.setenv("FINSHIELD_SETTING_SLACK_WEBHOOK_URL", URL)
+    put_suggestions()
+    with_ai()
+    assert fn.handler(ai_event())["kind"] == "SLACK_AI#CRITICAL"
     text = json.dumps(fn.sent[0][1])
-    assert "According to FinShield AI" in text and "96 / 100" in text and "CRITICAL" in text
-    assert "Second opinion" in text and "agrees with the computed severity" in text and "DNS_BLOCK" in text
-    assert "DPDP-aligned readiness and controls" in text and "compliant" not in text.lower().replace("non-compliant", "")
+    assert "According to FinShield AI" in text and "96 / 100" in text
+    assert "Second opinion" in text and "agrees with the computed severity" in text and "Check other users" in text
+    assert "DNS_BLOCK" in text and "need approval" in text
+    assert "Compliance mapping" in text and "Require a covering approval" in text and "Gap:" in text
+    assert "Waiting for a human decision" in text
+    assert "DPDP-aligned readiness and controls" in text and "compliant" not in text.lower()
     assert fn.handler(ai_event())["reason"] == "already sent" and len(fn.sent) == 1
+def test_stale_suggestions_for_old_score_are_not_shown(fn, monkeypatch):
+    monkeypatch.setenv("FINSHIELD_SETTING_SLACK_WEBHOOK_URL", URL)
+    put_suggestions(score=70)
+    with_ai()
+    fn.handler(ai_event())
+    text = json.dumps(fn.sent[0][1])
+    assert "Second opinion" not in text and "Compliance mapping" not in text
+def test_high_alert_gets_review_wording_and_waits_for_ai(fn, monkeypatch):
+    monkeypatch.setenv("FINSHIELD_SETTING_SLACK_WEBHOOK_URL", URL)
+    monkeypatch.setattr(fn, "AI_WAIT_S", 0)
+    a = ddb.get_item("Alerts", {"alert_id": AID})
+    a.update(severity="HIGH", score=70)
+    ddb.put_item("Alerts", a)
+    calls = []
+    real = fn.ddb.get_item
+    def get_item(table, key, consistent=False):
+        item = real(table, key, consistent)
+        if table == "Alerts":
+            calls.append(1)
+            if len(calls) == 3:  # ai_explain finishes while slack waits
+                item["ai"] = fixture("alert_sc01")["ai"]
+        return item
+    monkeypatch.setattr(fn.ddb, "get_item", get_item)
+    assert fn.handler({"ai_followup": True, "alert_id": AID})["kind"] == "SLACK_AI#HIGH"
+    text = json.dumps(fn.sent[0][1])
+    assert "Analyst review needed" in text and "Waiting for a human decision" not in text and "212" in text
 def test_ai_message_works_without_ai_or_suggestions(fn, monkeypatch):
     monkeypatch.setenv("FINSHIELD_SETTING_SLACK_WEBHOOK_URL", URL)
-    monkeypatch.setattr(fn, "ADVICE_WAIT_S", 0)
+    monkeypatch.setattr(fn, "AI_WAIT_S", 0)
     assert fn.handler(ai_event())["sent"] is True
     assert "not available yet" in json.dumps(fn.sent[0][1])
-def test_other_incident_updates_are_ignored(fn, monkeypatch):
-    monkeypatch.setenv("FINSHIELD_SETTING_SLACK_WEBHOOK_URL", URL)
-    ev = ai_event()
-    ev["detail"]["status"] = "CONTAINED"
-    assert fn.handler(ev)["sent"] is False and fn.sent == []
