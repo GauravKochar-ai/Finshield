@@ -21,7 +21,7 @@ its output is rejected if it contains a number or a regulation clause that code 
 | App | Folder | Who uses it | What it does | URL |
 | --- | --- | --- | --- | --- |
 | FinShield admin console | `web/` | Security, compliance, audit (Cognito groups Analyst, SecurityHead, ComplianceHead, Auditor, Admin) | Overview and posture, alerts, alert detail (signals, timeline, AI card, containment, deadlines), approvals, evidence verify and tamper demo, reports, compliance map, accuracy | CloudFront `https://djr2m04eyaclp.cloudfront.net` |
-| Simulator | `simulator-web/` | Admin (demo presenter) | Replays SC-01 to SC-10, GuardDuty sample findings, reset | own CloudFront URL (planned); interim `https://djr2m04eyaclp.cloudfront.net/simulator/` |
+| Simulator | `simulator-web/` | Admin (demo presenter) | Replays SC-01 to SC-10, GuardDuty sample findings, reset | `https://d3ldrhishawn1p.cloudfront.net` |
 | FinLend Ops (planned) | `user-web/` | The lender's own staff (Cognito group Staff) | Customer list, customer detail, KYC view/download/upload, read-only consent ledger. Every action becomes an event FinShield monitors; contained users are denied | own CloudFront URL (planned) |
 
 All three are Next.js 14 static exports in private S3 buckets behind CloudFront with Origin Access Control. They call

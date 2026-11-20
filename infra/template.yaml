@@ -1749,6 +1749,55 @@ Resources:
               StringEquals:
                 'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}'
 
+  # Simulator app (simulator-web/) on its own private bucket and CloudFront distribution
+  SimulatorWebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub finshield-${Stage}-simulator-web
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      Tags: [{ Key: project, Value: finshield }]
+  SimulatorWebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub finshield-${Stage}-simulator-web
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: simulator-web
+            DomainName: !GetAtt SimulatorWebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOac.Id
+            S3OriginConfig: { OriginAccessIdentity: '' }
+        DefaultCacheBehavior:
+          TargetOriginId: simulator-web
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          Compress: true
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 404, ResponsePagePath: /404.html }
+          - { ErrorCode: 404, ResponseCode: 404, ResponsePagePath: /404.html }
+      Tags: [{ Key: project, Value: finshield }]
+  SimulatorWebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SimulatorWebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontOac
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: 's3:GetObject'
+            Resource: !Sub '${SimulatorWebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${SimulatorWebDistribution}'
+
   # ===================== Monitoring =====================
   TimeToDetectAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -1791,6 +1840,12 @@ Outputs:
     Value: !Ref WebBucket
   CloudFrontUrl:
     Value: !Sub 'https://${WebDistribution.DomainName}'
+  SimulatorUrl:
+    Value: !Sub 'https://${SimulatorWebDistribution.DomainName}'
+  SimulatorWebBucket:
+    Value: !Ref SimulatorWebBucket
+  SimulatorDistributionId:
+    Value: !Ref SimulatorWebDistribution
   KycBucket:
     Value: !Ref KycBucket
   EvidenceBucket:

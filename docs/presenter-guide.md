@@ -8,8 +8,7 @@ on 20 Nov 2026. All data is synthetic and marked SAMPLE.
 | App | Link | Sign in as | Use it for |
 | --- | --- | --- | --- |
 | Admin console | https://djr2m04eyaclp.cloudfront.net | `securityhead@finshield.example` | Alerts, approve, release, evidence, reports, compliance |
-| Simulator | https://djr2m04eyaclp.cloudfront.net/simulator/ | `admin@finshield.example` | Run SC-01 to SC-10, reset, GuardDuty sample |
-| FinLend Ops (preview, sample data only) | https://djr2m04eyaclp.cloudfront.net/app/ | none (mock mode) | Show the staff portal FinShield monitors; not connected to the live API |
+| Simulator | https://d3ldrhishawn1p.cloudfront.net | `admin@finshield.example` | Run the 5 demo scenarios, reset, GuardDuty sample |
 
 Other console logins: `analyst@`, `compliancehead@`, `auditor@finshield.example`. The demo password is in `scripts/seed.sh`.
 
@@ -46,6 +45,16 @@ Fallbacks: alert not visible by 1:15 → backup video from the Attack step. AI c
 
 Full design: `docs/hld.md`. Services: CloudFront, S3, Cognito, API Gateway, EventBridge, Lambda (23), Step Functions, DynamoDB (13 tables), Bedrock (Mistral Large 3) and Guardrails, CloudTrail, AWS Config, GuardDuty, IAM, SNS, SSM Parameter Store, Secrets Manager, KMS, CloudWatch, Route 53 Resolver DNS Firewall (optional).
 
+## 4b. The 5 demo scenarios (all raise an alert you can open in the admin console)
+
+| ID | Risk | Story | Expected | Signs |
+| --- | --- | --- | --- | --- |
+| SC-01 | KYC exfiltration (mandatory demo) | Ops admin, 23:40, emergency role from a new device and second city, 212 KYC files, external upload | CRITICAL 96 | S1 40, S3 20, S4 15, S5 11, S6 10 |
+| SC-06 | Compromised privileged credentials | Cloud admin: 6 MFA pushes, login 1,400 km away, emergency role, StopLogging | CRITICAL 100 | S5, S3, S8 (instant 100) |
+| SC-07 | Consent and purpose violation | Marketing user reads KYC of 40 customers who consented only to loan processing | HIGH 70 | S9 30, S7 40 |
+| SC-08 | Abnormal transaction | Bank account changed from a new device, then Rs 4.8 lakh disbursed to it at 01:40 | HIGH 65 | S10 50, S6 10, S5 5 |
+| SC-09 | Cloud misconfiguration | KYC bucket made public; AWS Config marks it non-compliant | MEDIUM 45 | S11 45 |
+
 ## 5. Likely judge questions
 
 | Question | Answer |
@@ -60,6 +69,6 @@ Full design: `docs/hld.md`. Services: CloudFront, S3, Cognito, API Gateway, Even
 ## 6. Known limits (say them before judges find them)
 
 - Containment runs in DRY_RUN in this demo. Deactivate keys is not applicable to the SC-01 role principal.
-- FinLend Ops is a sample-data preview. Its staff API is written but not deployed (branch `wip/feat-002-staff-api`).
-- All three apps are under one CloudFront domain for now; separate URLs per app were planned next.
+- The simulator shows 5 demo scenarios. The Accuracy panel still replays all 11 scenarios plus 7 normal days.
+- The FinLend Ops staff app is dropped from this build (code kept on branches `feat/user-web` and `wip/feat-002-staff-api`).
 - Real mode through CloudTrail works but adds minutes of delivery delay, so it is not in the main demo.
