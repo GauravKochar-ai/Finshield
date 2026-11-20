@@ -593,6 +593,7 @@ Resources:
       FunctionName: !Sub finshield-${Stage}-baseline
       Description: "Hourly baselines per user and team (M3)"
       CodeUri: ../backend/functions/baseline/
+      Timeout: 120
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref EventsTable
@@ -1007,6 +1008,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlertsTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref CountersTable
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
@@ -1037,6 +1040,8 @@ Resources:
             TableName: !Ref AlertsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AccuracyRunsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CountersTable
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
         - Statement:

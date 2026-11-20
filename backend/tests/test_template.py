@@ -119,7 +119,12 @@ def _load(name):
     return mod
 
 
-@pytest.mark.parametrize("name", _fn_dirs())
+def _stub_dirs():
+    """Functions whose owner has not replaced the stub yet."""
+    return [n for n in _fn_dirs() if "stub.handle(" in (FUNCS / n / "app.py").read_text()]
+
+
+@pytest.mark.parametrize("name", _stub_dirs())
 def test_stub_logs_and_returns_ok(name, caplog):
     out = _load(name).handler({"alert_id": "ALR-20261120-0007", "event_id": "evt-1"}, None)
     assert out == {"status": "OK", "function": name, "stub": True}

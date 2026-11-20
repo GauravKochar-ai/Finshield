@@ -1,0 +1,117 @@
+{
+ "scenario_id": "SC-06",
+ "title": "Compromised cloud admin: 6 MFA pushes, login from a distant city, emergency role, StopLogging",
+ "user_id": "u-046",
+ "start_time_ist": "02:05:00",
+ "expected_score": 100,
+ "expected_level": "CRITICAL",
+ "signs": [
+  "S5 11",
+  "S3 20",
+  "S8 100"
+ ],
+ "sample": true,
+ "events": [
+  {
+   "offset_seconds": 0,
+   "event_id": "sc-06-0001",
+   "source": "simulator",
+   "action": "LOGIN",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Kolkata",
+   "device_id": "d-u-046"
+  },
+  {
+   "offset_seconds": 900,
+   "event_id": "sc-06-0002",
+   "source": "simulator",
+   "action": "MFA_PUSH",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4"
+  },
+  {
+   "offset_seconds": 920,
+   "event_id": "sc-06-0003",
+   "source": "simulator",
+   "action": "MFA_PUSH",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4"
+  },
+  {
+   "offset_seconds": 940,
+   "event_id": "sc-06-0004",
+   "source": "simulator",
+   "action": "MFA_PUSH",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4"
+  },
+  {
+   "offset_seconds": 960,
+   "event_id": "sc-06-0005",
+   "source": "simulator",
+   "action": "MFA_PUSH",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4"
+  },
+  {
+   "offset_seconds": 980,
+   "event_id": "sc-06-0006",
+   "source": "simulator",
+   "action": "MFA_PUSH",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4"
+  },
+  {
+   "offset_seconds": 1000,
+   "event_id": "sc-06-0007",
+   "source": "simulator",
+   "action": "MFA_PUSH",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4"
+  },
+  {
+   "offset_seconds": 1030,
+   "event_id": "sc-06-0008",
+   "source": "simulator",
+   "action": "LOGIN",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4"
+  },
+  {
+   "offset_seconds": 1150,
+   "event_id": "sc-06-0009",
+   "source": "simulator",
+   "action": "ASSUME_ROLE",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4",
+   "role": "KYC-Emergency"
+  },
+  {
+   "offset_seconds": 1270,
+   "event_id": "sc-06-0010",
+   "source": "simulator",
+   "action": "LOGGING_CHANGE",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-046",
+   "city": "Delhi",
+   "device_id": "d-new-66",
+   "ip": "185.220.101.4",
+   "resource_arn": "arn:aws:cloudtrail:ap-south-1:000000000000:trail/finshield-dev-trail"
+  }
+ ]
+}
