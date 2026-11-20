@@ -8,6 +8,19 @@ export const hm = (s?: string | null): string => (s ? s.slice(11, 16) : '');
 export const hms = (s?: string | null): string => (s ? s.slice(11, 19) : '');
 export const bytes = (b?: number | null): string =>
   !b ? '0 B' : b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b >= 1e6 ? (b / 1e6).toFixed(0) + ' MB' : fmt(b) + ' B';
+/** AWS role or user name without the stack prefix and the CloudFormation suffix:
+ *  "finshield-dev-KycLabelFunctionRole-idBAuQb6V1gg" -> "KycLabelFunctionRole". */
+export const shortName = (n?: string | null): string =>
+  (n || '').replace(/^finshield-[a-z0-9]+-/i, '').replace(/-[A-Za-z0-9]{10,14}$/, '');
+/** User id for display. Unknown AWS identities arrive as "unmapped:<arn>"; show "aws:<role or user name>",
+ *  never the full ARN. Known users (u-017, svc-ckyc) are shown as they are. */
+export const userLabel = (id?: string | null): string => {
+  if (!id) return '-';
+  if (!id.startsWith('unmapped:')) return id;
+  const arn = id.slice('unmapped:'.length);
+  const m = arn.match(/assumed-role\/([^/]+)/) || arn.match(/:(?:role|user)\/([^/]+)/);
+  return `aws:${shortName(m ? m[1] : arn.split(/[/:]/).pop()) || 'unknown'}`;
+};
 export const initials = (n?: string): string =>
   (n || '?').split(/[\s.\-_]+/).filter(Boolean).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
 export const avColor = (s: string): string =>

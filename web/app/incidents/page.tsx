@@ -10,7 +10,7 @@ import { AlertTable } from '@/components/AlertTable';
 import { EvidenceChain } from '@/components/EvidenceChain';
 import { Ring } from '@/components/charts';
 import { Av, Empty, ErrorCard, Loading, Pill, SevBar, sevColor } from '@/components/ui';
-import { actionName, bytes, fmt, hm, incidentType, label, signalText, ts, SEV_COLOR } from '@/lib/format';
+import { actionName, bytes, fmt, hm, incidentType, label, shortName, signalText, ts, userLabel, SEV_COLOR } from '@/lib/format';
 
 function Incidents() {
   const { alerts, error } = useAlerts();
@@ -70,7 +70,7 @@ function Detail({ id }: { id: string }) {
           <div className="row wrap"><Pill sev={a.severity}>● {a.severity}</Pill><span className="pill cat">{incidentType(a.scenario_id)}</span><span className="mono dim">{a.alert_id}</span></div>
           <h2>{ai?.headline ?? 'Incident under investigation'}</h2>
           <div className="row wrap muted" style={{ gap: 16, fontSize: 13 }}>
-            <span className="who"><Av name={a.user_id} size={26} /><b style={{ color: 'var(--ink)' }}>{user.data?.name_pseudo ?? a.user_id}</b>{user.data && <> · {user.data.role} · {user.data.team}</>}</span>
+            <span className="who"><Av name={userLabel(a.user_id)} size={26} /><b style={{ color: 'var(--ink)' }}>{user.data?.name_pseudo ?? userLabel(a.user_id)}</b>{user.data && <> · {user.data.role} · {user.data.team}</>}</span>
             <span>Detected {ts(a.detected_at)} IST</span><span>Activity from {hm(a.window_start)}</span></div>
           <div className="steps" style={{ marginTop: 20 }}>
             {steps.map((s, i) => <div key={s[0]} className={`step ${done[s[0]] ? 'done' : i === firstOpen ? 'now' : ''}`}><div className="c">{done[s[0]] ? '✓' : i + 1}</div><b>{s[1]}</b>{s[2]}</div>)}</div></div>
@@ -93,8 +93,8 @@ function Detail({ id }: { id: string }) {
           {a.exceptions_applied.length > 0 && <p className="muted">Approved work {a.exceptions_applied.join(', ')} applied, score capped.</p>}
           {keyEv.length > 0 && <><h3 style={{ marginTop: 16 }}>Key events</h3>
             <div className="tl" style={{ maxHeight: 360, overflow: 'auto' }}>{keyEv.slice(0, 60).map((e) => (
-              <div key={e.event_id} className={`tli ${KEYS.includes(e.action) ? 'bad' : ''}`}><div className="t">{hm(e.ts)}</div>
-                <div>{e.action === 'MFA_PUSH' ? `${e.n ?? 1} login approval pop-ups (MFA)` : label(e.action)}{e.object_id ? ` · ${e.object_id}` : ''}{e.role ? ` · ${e.role}` : ''}{e.destination ? ` → ${e.destination}` : ''}{e.resource_arn ? ` · ${e.resource_arn}` : ''}{e.device_id && e.action === 'LOGIN' ? ` · device ${e.device_id}` : ''}</div></div>
+              <div key={e.event_id} className={`tli ${KEYS.includes(e.action) ? 'bad' : ''}`} title={e.resource_arn ?? undefined}><div className="t">{hm(e.ts)}</div>
+                <div>{e.action === 'MFA_PUSH' ? `${e.n ?? 1} login approval pop-ups (MFA)` : label(e.action)} · {userLabel(e.user_id)}{e.object_id ? ` · ${e.object_id}` : ''}{e.role && !e.user_id?.startsWith('unmapped:') ? ` · role ${shortName(e.role)}` : ''}{e.destination ? ` → ${e.destination}` : ''}{e.device_id && e.action === 'LOGIN' ? ` · device ${e.device_id}` : ''}</div></div>
             ))}</div></>}
         </div>
         <AiCard alert={a} groups={groups} />

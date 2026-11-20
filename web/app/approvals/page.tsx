@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth';
 import { useLoad } from '@/lib/hooks';
 import { useAlerts } from '@/components/Shell';
 import { Empty, ErrorCard, Loading, Pill } from '@/components/ui';
-import { hm, incidentType, ts } from '@/lib/format';
+import { hm, incidentType, ts, userLabel } from '@/lib/format';
 
 export default function Approvals() {
   const { session } = useAuth();
@@ -28,8 +28,8 @@ export default function Approvals() {
       {pending.length === 0 ? <Empty icon="✅">Nothing is waiting for approval.</Empty> : pending.map((a) => (
         <div key={a.alert_id} className="card" style={{ marginBottom: 14 }}>
           <div className="row wrap"><Pill sev={a.severity} /><span className="pill cat">{incidentType(a.scenario_id)}</span><span className="mono dim">{a.alert_id}</span></div>
-          <div style={{ fontSize: 17, fontWeight: 700, margin: '10px 0 4px' }}>Lock down account {a.user_id}</div>
-          <div className="muted">{a.ai?.headline ?? ''} · {a.user_id} · risk {a.score} · detected {hm(a.detected_at)}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, margin: '10px 0 4px' }}>Lock down account {userLabel(a.user_id)}</div>
+          <div className="muted">{a.ai?.headline ?? ''} · {userLabel(a.user_id)} · risk {a.score} · detected {hm(a.detected_at)}</div>
           <div className="row" style={{ marginTop: 14 }}>
             {can.decide(groups) ? <><button className="btn ok" onClick={() => decide(a.alert_id, 'APPROVE')}>✓ Approve</button><button className="btn" onClick={() => decide(a.alert_id, 'REJECT')}>Reject</button></>
               : <span className="muted">Only the Security Head or Compliance Head can approve.</span>}

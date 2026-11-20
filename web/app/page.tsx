@@ -6,7 +6,7 @@ import { useLoad, useNow } from '@/lib/hooks';
 import { useAlerts } from '@/components/Shell';
 import { AreaChart, Donut, HBars, Ring } from '@/components/charts';
 import { Av, ErrorCard, Pill, SevBar, sevColor } from '@/components/ui';
-import { DEADLINE_HOURS, DEADLINE_LABEL, SEV_COLOR, checkName, incidentType, countdown, fmt, hms, label } from '@/lib/format';
+import { DEADLINE_HOURS, DEADLINE_LABEL, SEV_COLOR, checkName, incidentType, countdown, fmt, hms, label, userLabel } from '@/lib/format';
 
 const BAD_ACTIONS = ['UPLOAD_EXTERNAL', 'ASSUME_ROLE', 'STOP_LOGGING', 'CONFIG_CHANGE', 'GUARDDUTY_FINDING', 'CHANGE_BANK_ACCOUNT'];
 const ICON: Record<string, [string, string]> = {
@@ -97,15 +97,15 @@ export default function Overview() {
                 <tr key={a.alert_id} className="click" onClick={() => router.push(`/incidents/?id=${a.alert_id}`)}>
                   <td><Pill sev={a.severity} /></td>
                   <td><div style={{ fontWeight: 600 }}>{a.ai?.headline ?? incidentType(a.scenario_id)}</div><div className="mono dim">{a.alert_id}</div></td>
-                  <td><div className="who"><Av name={a.user_id} /><div>{a.user_id}</div></div></td>
+                  <td><div className="who"><Av name={userLabel(a.user_id)} /><div>{userLabel(a.user_id)}</div></div></td>
                   <td style={{ width: 120 }}><div className="row"><b>{a.score}</b><div style={{ flex: 1 }}><SevBar pct={a.score} color={sevColor(a.severity)} /></div></div></td>
                   <td className="muted">{label(a.status)}</td></tr>
               ))}</tbody></table>
           ) : <div className="empty"><div className="big">🛡️</div>All clear. Activity from FinLend systems is being monitored.</div>}
           <h3 style={{ marginTop: 18 }}>Riskiest identities</h3>
           {risky.length ? risky.map((a) => (
-            <div key={a.user_id} className="row" style={{ padding: '7px 0' }}><Av name={a.user_id} />
-              <div style={{ width: 190 }}><div>{a.user_id}</div><div className="dim" style={{ fontSize: 12 }}></div></div>
+            <div key={a.user_id} className="row" style={{ padding: '7px 0' }}><Av name={userLabel(a.user_id)} />
+              <div style={{ width: 190 }}><div>{userLabel(a.user_id)}</div><div className="dim" style={{ fontSize: 12 }}></div></div>
               <div style={{ flex: 1 }}><SevBar pct={a.score} color={sevColor(a.severity)} /></div><b style={{ width: 30, textAlign: 'right' }}>{a.score}</b></div>
           )) : <div className="muted">No risky activity yet.</div>}
           {p.deadlines_due_soon.length > 0 && <>
@@ -122,7 +122,7 @@ export default function Overview() {
               return (
                 <div key={f.event_id} className={`fi ${bad ? 'bad' : ''}`}><span className="t">{hms(f.ts)}</span>
                   <span className="ic" style={{ background: ic[1] + '22', color: ic[1] }}>{ic[0]}</span>
-                  <span><b>{f.user_id}</b> <span className="act">{label(f.action)}</span>{f.object_id ? ` ${f.object_id}` : ''}{f.destination ? ` → ${f.destination}` : ''}{f.source !== 'simulator' && <> <span className="pill cat">{f.source}</span></>}</span></div>
+                  <span><b>{userLabel(f.user_id)}</b> <span className="act">{label(f.action)}</span>{f.object_id ? ` ${f.object_id}` : ''}{f.destination ? ` → ${f.destination}` : ''}{f.source !== 'simulator' && <> <span className="pill cat">{f.source}</span></>}</span></div>
               );
             }) : <div className="empty">Waiting for events…</div>}</div></div>
       </div>
