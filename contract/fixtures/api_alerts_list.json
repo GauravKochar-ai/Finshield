@@ -1,0 +1,159 @@
+{
+  "data": [
+    {
+      "alert_id": "ALR-20261120-0007",
+      "user_id": "u-017",
+      "principal_arn": "arn:aws:iam::000000000000:role/finshield-dev-demo-ops-admin",
+      "score": 96,
+      "severity": "CRITICAL",
+      "status": "AWAITING_APPROVAL",
+      "signals": [
+        {
+          "code": "S1",
+          "points": 40,
+          "facts": {
+            "downloads_15m": 212,
+            "baseline_p95": 2,
+            "ratio": 106
+          }
+        },
+        {
+          "code": "S3",
+          "points": 20,
+          "facts": {
+            "role": "KYC-Emergency",
+            "covering_approval": false
+          }
+        },
+        {
+          "code": "S4",
+          "points": 15,
+          "facts": {
+            "destination": "files.example-share.com",
+            "bytes": 215000000,
+            "minutes_after_downloads": 3
+          }
+        },
+        {
+          "code": "S5",
+          "points": 11,
+          "facts": {
+            "new_device": "d-new-77",
+            "cities": [
+              "Pune",
+              "Delhi"
+            ],
+            "distance_km": 1180,
+            "window_minutes": 42
+          }
+        },
+        {
+          "code": "S6",
+          "points": 10,
+          "facts": {
+            "local_time": "23:40",
+            "usual_hours": "09:00-18:00"
+          }
+        }
+      ],
+      "exceptions_applied": [],
+      "customers_affected": 198,
+      "data_classes": [
+        "KYC"
+      ],
+      "event_ids": [
+        "evt-8f21",
+        "evt-8f22",
+        "evt-8f23"
+      ],
+      "detected_at": "2026-11-20T23:49:02+05:30",
+      "window_start": "2026-11-20T23:40:00+05:30",
+      "scenario_id": "SC-01",
+      "deadlines": [
+        {
+          "body": "RBI",
+          "due_at": "2026-11-21T05:49:02+05:30"
+        },
+        {
+          "body": "CERT-In",
+          "due_at": "2026-11-21T05:49:02+05:30"
+        },
+        {
+          "body": "DPB",
+          "due_at": "2026-11-23T23:49:02+05:30"
+        }
+      ],
+      "containment": [
+        {
+          "action": "REVOKE_SESSIONS",
+          "mode": "LIVE",
+          "result": "OK",
+          "at": "2026-11-20T23:49:09+05:30"
+        },
+        {
+          "action": "DEACTIVATE_KEYS",
+          "mode": "LIVE",
+          "result": "OK",
+          "at": "2026-11-20T23:49:10+05:30"
+        },
+        {
+          "action": "BUCKET_DENY",
+          "mode": "LIVE",
+          "result": "OK",
+          "at": "2026-11-20T23:49:11+05:30"
+        },
+        {
+          "action": "DNS_BLOCK",
+          "mode": "DRY_RUN",
+          "result": "OK",
+          "at": "2026-11-20T23:49:12+05:30"
+        }
+      ],
+      "ai": {
+        "headline": "Privileged ops account bulk-exported 212 KYC files off-hours and sent them to an external share",
+        "summary": "SAMPLE. An operations admin assumed the KYC-Emergency role at 23:40 from a new device and a second city, then downloaded 212 KYC files in 15 minutes, 106 times the usual rate. The files were uploaded to a destination that is not on the allowlist. 198 customers are affected.",
+        "why_unusual": [
+          "212 downloads vs usual 2 per 15 min (106x)",
+          "Emergency role assumed with no covering approval",
+          "New device and a second city within one hour",
+          "Activity at 23:40, outside usual hours",
+          "Upload to non-allowlisted destination files.example-share.com"
+        ],
+        "rules_affected": [
+          {
+            "regulation": "DPDP Act 2023",
+            "clause": "Sec 8(5)",
+            "why": "Reasonable security safeguards to prevent a personal data breach (verify clause)."
+          },
+          {
+            "regulation": "CERT-In Directions 2022",
+            "clause": "Para (i)",
+            "why": "Report cyber incidents within 6 hours (verify clause)."
+          }
+        ],
+        "root_cause_hypotheses": [
+          "Compromised privileged credentials",
+          "Insider misuse of the emergency role"
+        ],
+        "affected_assets": [
+          "finshield-dev-kyc-docs"
+        ],
+        "recommended_actions": [
+          "Keep sessions revoked and bucket deny in place",
+          "Approve lock-down of the principal",
+          "Prepare RBI and CERT-In reports before the 6 h timers"
+        ],
+        "confidence": "high",
+        "confidence_reason": "Five independent signals agree and the volume is far outside baseline.",
+        "numbers_used": {
+          "downloads_15m": 212,
+          "customers_affected": 198,
+          "score": 96
+        }
+      },
+      "ai_status": "OK",
+      "execution_arn": "arn:aws:states:ap-south-1:000000000000:execution:finshield-dev-incident:ALR-20261120-0007-CRITICAL"
+    }
+  ],
+  "error": null
+}

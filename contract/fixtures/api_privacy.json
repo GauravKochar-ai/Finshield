@@ -1,0 +1,19 @@
+{
+  "data": {
+    "consent_risks": [
+      {
+        "customer_id": "C-10442",
+        "issue": "SAMPLE: KYC accessed for a purpose not in the consent ledger"
+      }
+    ],
+    "unmasked_aadhaar_files": [
+      {
+        "file_id": "F-0007",
+        "customer_id": "C-10443",
+        "doc_type": "AADHAAR_FRONT"
+      }
+    ],
+    "purpose_mismatches": []
+  },
+  "error": null
+}

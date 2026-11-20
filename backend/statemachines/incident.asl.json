@@ -1,0 +1,581 @@
+{
+  "Comment": "finshield-incident (Standard). Input = Alert Raised detail. STUB-LEVEL skeleton by M1; M4 owns the real behaviour.",
+  "StartAt": "EvidenceAlertRaised",
+  "States": {
+    "EvidenceAlertRaised": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${EvidenceFnArn}",
+        "Payload": {
+          "action": "append",
+          "alert_id.$": "$.alert_id",
+          "type": "ALERT_RAISED",
+          "actor": "incident",
+          "payload": {
+            "alert.$": "$.alert_id",
+            "severity.$": "$.severity",
+            "score.$": "$.score"
+          }
+        }
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "ResultPath": "$.evidence_alert_raised",
+      "Next": "SetDeadlines"
+    },
+    "SetDeadlines": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${SetDeadlinesFnArn}",
+        "Payload": {
+          "alert_id.$": "$.alert_id",
+          "detected_at.$": "$.detected_at"
+        }
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "ResultPath": "$.deadlines",
+      "Next": "BranchOnSeverity"
+    },
+    "BranchOnSeverity": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.severity",
+          "StringEquals": "CRITICAL",
+          "Next": "CriticalParallel"
+        },
+        {
+          "Variable": "$.severity",
+          "StringEquals": "HIGH",
+          "Next": "HighNotify"
+        }
+      ],
+      "Default": "MediumAi"
+    },
+    "CriticalParallel": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "RevokeSessions",
+          "States": {
+            "RevokeSessions": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${RevokeFnArn}",
+                "Payload": {
+                  "alert_id.$": "$.alert_id",
+                  "principal_arn.$": "$.principal_arn",
+                  "mode": "${ContainmentMode}"
+                }
+              },
+              "ResultSelector": {
+                "result.$": "$.Payload"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ],
+              "ResultPath": "$.revoke",
+              "Next": "DeactivateKeys"
+            },
+            "DeactivateKeys": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${DeactivateFnArn}",
+                "Payload": {
+                  "alert_id.$": "$.alert_id",
+                  "principal_arn.$": "$.principal_arn",
+                  "mode": "${ContainmentMode}"
+                }
+              },
+              "ResultSelector": {
+                "result.$": "$.Payload"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ],
+              "ResultPath": "$.deactivate",
+              "Next": "BucketDeny"
+            },
+            "BucketDeny": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${BucketDenyFnArn}",
+                "Payload": {
+                  "alert_id.$": "$.alert_id",
+                  "principal_arn.$": "$.principal_arn",
+                  "mode": "${ContainmentMode}"
+                }
+              },
+              "ResultSelector": {
+                "result.$": "$.Payload"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ],
+              "ResultPath": "$.bucket_deny",
+              "Next": "DnsBlock"
+            },
+            "DnsBlock": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${DnsBlockFnArn}",
+                "Payload": {
+                  "alert_id.$": "$.alert_id",
+                  "principal_arn.$": "$.principal_arn",
+                  "mode": "${ContainmentMode}"
+                }
+              },
+              "ResultSelector": {
+                "result.$": "$.Payload"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ],
+              "ResultPath": "$.dns_block",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "AiExplain",
+          "States": {
+            "AiExplain": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${AiExplainFnArn}",
+                "Payload.$": "$"
+              },
+              "ResultSelector": {
+                "result.$": "$.Payload"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ],
+              "TimeoutSeconds": 8,
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": "$.ai_error",
+                  "Next": "AiFallbackNoted"
+                }
+              ],
+              "ResultPath": "$.ai",
+              "End": true
+            },
+            "AiFallbackNoted": {
+              "Type": "Pass",
+              "Comment": "ai_explain failed or exceeded 8 s; the alert keeps ai_status=FALLBACK (template explanation written by ai_explain fallback path).",
+              "Result": {
+                "ai_status": "FALLBACK"
+              },
+              "ResultPath": "$.ai",
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.critical",
+      "Next": "InvokeReportsAsync"
+    },
+    "InvokeReportsAsync": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AiReportsFnArn}",
+        "InvocationType": "Event",
+        "Payload": {
+          "alert_id.$": "$.alert_id"
+        }
+      },
+      "ResultPath": "$.reports",
+      "Next": "NotifyCritical"
+    },
+    "NotifyCritical": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${AlertTopicArn}",
+        "Subject": "FinShield CRITICAL alert (SAMPLE)",
+        "Message.$": "States.Format('Alert {} score {}. Approval needed within 30 minutes.', $.alert_id, $.score)"
+      },
+      "ResultPath": "$.notified",
+      "Next": "AwaitApproval"
+    },
+    "AwaitApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "TimeoutSeconds": 1800,
+      "Parameters": {
+        "FunctionName": "${DecisionFnArn}",
+        "Payload": {
+          "action": "STORE_TOKEN",
+          "alert_id.$": "$.alert_id",
+          "task_token.$": "$$.Task.Token",
+          "execution_arn.$": "$$.Execution.Id"
+        }
+      },
+      "ResultPath": "$.approval",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Timeout"
+          ],
+          "ResultPath": "$.approval_error",
+          "Next": "EscalateToComplianceHead"
+        }
+      ],
+      "Next": "DecisionChoice"
+    },
+    "EscalateToComplianceHead": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${AlertTopicArn}",
+        "Subject": "FinShield ESCALATION to ComplianceHead (SAMPLE)",
+        "Message.$": "States.Format('Alert {} approval timed out after 30 minutes. Escalated.', $.alert_id)"
+      },
+      "ResultPath": "$.escalated",
+      "Next": "AwaitApprovalEscalated"
+    },
+    "AwaitApprovalEscalated": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "TimeoutSeconds": 1800,
+      "Parameters": {
+        "FunctionName": "${DecisionFnArn}",
+        "Payload": {
+          "action": "STORE_TOKEN",
+          "alert_id.$": "$.alert_id",
+          "task_token.$": "$$.Task.Token",
+          "execution_arn.$": "$$.Execution.Id"
+        }
+      },
+      "ResultPath": "$.approval",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Timeout"
+          ],
+          "ResultPath": "$.approval_error",
+          "Next": "ApprovalTimedOut"
+        }
+      ],
+      "Next": "DecisionChoice"
+    },
+    "ApprovalTimedOut": {
+      "Type": "Pass",
+      "Result": {
+        "decision": "TIMEOUT"
+      },
+      "ResultPath": "$.approval",
+      "Next": "DecisionChoice"
+    },
+    "DecisionChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.approval.decision",
+          "StringEquals": "APPROVE",
+          "Next": "Quarantine"
+        },
+        {
+          "Variable": "$.approval.decision",
+          "StringEquals": "REJECT",
+          "Next": "RecordRejection"
+        }
+      ],
+      "Default": "EvidenceClosed"
+    },
+    "Quarantine": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${QuarantineFnArn}",
+        "Payload": {
+          "alert_id.$": "$.alert_id",
+          "principal_arn.$": "$.principal_arn",
+          "mode": "${ContainmentMode}"
+        }
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "ResultPath": "$.quarantine",
+      "Next": "EvidenceClosed"
+    },
+    "RecordRejection": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${EvidenceFnArn}",
+        "Payload": {
+          "action": "append",
+          "alert_id.$": "$.alert_id",
+          "type": "DECISION_REJECTED",
+          "actor": "incident",
+          "payload": {
+            "alert.$": "$.alert_id",
+            "containment": "kept"
+          }
+        }
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "ResultPath": "$.rejection",
+      "Next": "EvidenceClosed"
+    },
+    "EvidenceClosed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${EvidenceFnArn}",
+        "Payload": {
+          "action": "append",
+          "alert_id.$": "$.alert_id",
+          "type": "CLOSED_STEP",
+          "actor": "incident",
+          "payload": {
+            "alert.$": "$.alert_id"
+          }
+        }
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "ResultPath": "$.evidence_closed",
+      "Next": "ExportEvidence"
+    },
+    "ExportEvidence": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${EvidenceFnArn}",
+        "Payload": {
+          "action": "export",
+          "alert_id.$": "$.alert_id"
+        }
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "ResultPath": "$.export",
+      "End": true
+    },
+    "HighNotify": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${AlertTopicArn}",
+        "Subject": "FinShield HIGH alert (SAMPLE)",
+        "Message.$": "States.Format('Alert {} score {}.', $.alert_id, $.score)"
+      },
+      "ResultPath": "$.notified",
+      "Next": "HighAi"
+    },
+    "HighAi": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AiExplainFnArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "TimeoutSeconds": 8,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.ai_error",
+          "Next": "HighStepUpMfaFlag"
+        }
+      ],
+      "ResultPath": "$.ai",
+      "Next": "HighStepUpMfaFlag"
+    },
+    "HighStepUpMfaFlag": {
+      "Type": "Pass",
+      "Comment": "P2: set step-up MFA flag on the user",
+      "Result": {
+        "step_up_mfa": true
+      },
+      "ResultPath": "$.mfa_flag",
+      "End": true
+    },
+    "MediumAi": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AiExplainFnArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "TimeoutSeconds": 8,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.ai_error",
+          "Next": "MediumOpen"
+        }
+      ],
+      "ResultPath": "$.ai",
+      "Next": "MediumOpen"
+    },
+    "MediumOpen": {
+      "Type": "Pass",
+      "Comment": "status stays OPEN",
+      "Result": {
+        "status": "OPEN"
+      },
+      "ResultPath": "$.final",
+      "End": true
+    }
+  }
+}

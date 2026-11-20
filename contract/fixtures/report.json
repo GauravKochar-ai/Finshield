@@ -1,0 +1,8 @@
+{
+  "alert_id": "ALR-20261120-0007",
+  "report_type": "RBI_INCIDENT",
+  "status": "DRAFT",
+  "body_md": "# RBI incident report (SAMPLE draft)\n\nDetected at 2026-11-20T23:49:02+05:30. 212 KYC files, 198 customers. Readiness timer: 6 h.",
+  "model_id": "SAMPLE-model",
+  "generated_at": "2026-11-20T23:49:20+05:30"
+}

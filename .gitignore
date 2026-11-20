@@ -5,3 +5,10 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+build/
+infra/.aws-sam/
+node_modules/
+.next/
+web/out/
+web/.env.local
+.pytest_cache/

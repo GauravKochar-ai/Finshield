@@ -1,0 +1,22 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "finshield-dev"
+region = "ap-south-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+region = "ap-south-1"
+capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = false
+fail_on_empty_changeset = false
+resolve_s3 = true
+disable_rollback = false
+tags = "project=finshield"
+parameter_overrides = "Stage=dev"

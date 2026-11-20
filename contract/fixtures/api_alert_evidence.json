@@ -1,0 +1,120 @@
+{
+  "data": [
+    {
+      "alert_id": "ALR-20261120-0007",
+      "seq": 1,
+      "ts": "2026-11-20T23:49:03+05:30",
+      "type": "ALERT_RAISED",
+      "actor": "detection",
+      "payload": {
+        "alert_id": "ALR-20261120-0007",
+        "severity": "CRITICAL",
+        "previous_severity": null,
+        "score": 96,
+        "user_id": "u-017",
+        "principal_arn": "arn:aws:iam::000000000000:role/finshield-dev-demo-ops-admin",
+        "detected_at": "2026-11-20T23:49:02+05:30"
+      },
+      "prev_hash": "GENESIS:ALR-20261120-0007",
+      "hash": "4f286f1b84d19ff178bf2d9cd22f407ba858c750f10abbc19d119a96097136b6"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "seq": 2,
+      "ts": "2026-11-20T23:49:04+05:30",
+      "type": "DEADLINES_SET",
+      "actor": "incident",
+      "payload": {
+        "deadlines": [
+          {
+            "body": "RBI",
+            "due_at": "2026-11-21T05:49:02+05:30"
+          },
+          {
+            "body": "CERT-In",
+            "due_at": "2026-11-21T05:49:02+05:30"
+          },
+          {
+            "body": "DPB",
+            "due_at": "2026-11-23T23:49:02+05:30"
+          }
+        ]
+      },
+      "prev_hash": "4f286f1b84d19ff178bf2d9cd22f407ba858c750f10abbc19d119a96097136b6",
+      "hash": "d312efeddfad1a25b412ce141d2e8bb27a05c0faec2b33a304cc262342cb6b3a"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "seq": 3,
+      "ts": "2026-11-20T23:49:05+05:30",
+      "type": "CONTAIN_REVOKE_SESSIONS",
+      "actor": "contain_revoke_sessions",
+      "payload": {
+        "mode": "LIVE",
+        "result": "OK",
+        "detail": "inline deny aws:TokenIssueTime"
+      },
+      "prev_hash": "d312efeddfad1a25b412ce141d2e8bb27a05c0faec2b33a304cc262342cb6b3a",
+      "hash": "d280d5c86613a6617d6f2a8663fc956a1cd4c0e5d544b55a348a62934a012f45"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "seq": 4,
+      "ts": "2026-11-20T23:49:06+05:30",
+      "type": "CONTAIN_DEACTIVATE_KEYS",
+      "actor": "contain_deactivate_keys",
+      "payload": {
+        "mode": "LIVE",
+        "result": "OK",
+        "detail": "access keys set Inactive"
+      },
+      "prev_hash": "d280d5c86613a6617d6f2a8663fc956a1cd4c0e5d544b55a348a62934a012f45",
+      "hash": "57a0b5b808766548584b6627262ec887b31011a85c6416519328a8323772ba46"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "seq": 5,
+      "ts": "2026-11-20T23:49:07+05:30",
+      "type": "CONTAIN_BUCKET_DENY",
+      "actor": "contain_bucket_deny",
+      "payload": {
+        "mode": "LIVE",
+        "result": "OK",
+        "detail": "Sid FinShieldDenyu-017"
+      },
+      "prev_hash": "57a0b5b808766548584b6627262ec887b31011a85c6416519328a8323772ba46",
+      "hash": "f63aeb32db7846f93580d9362c679bf95991922e442d152b0c7ea8c3c4989df6"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "seq": 6,
+      "ts": "2026-11-20T23:49:08+05:30",
+      "type": "CONTAIN_DNS_BLOCK",
+      "actor": "contain_dns_block",
+      "payload": {
+        "mode": "DRY_RUN",
+        "result": "OK",
+        "detail": {
+          "would_call": "route53resolver:CreateFirewallRule",
+          "domain": "files.example-share.com"
+        }
+      },
+      "prev_hash": "f63aeb32db7846f93580d9362c679bf95991922e442d152b0c7ea8c3c4989df6",
+      "hash": "d9beb4071a5c172bf1b4cdb71c9a925a995837e2e676af67aa03ad3af305de08"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "seq": 7,
+      "ts": "2026-11-20T23:49:09+05:30",
+      "type": "AI_EXPLAINED",
+      "actor": "ai_explain",
+      "payload": {
+        "ai_status": "OK",
+        "score": 96
+      },
+      "prev_hash": "d9beb4071a5c172bf1b4cdb71c9a925a995837e2e676af67aa03ad3af305de08",
+      "hash": "b6a87a871ceab3be3904edc027c837ffd2f01116f00d6349bb2c100809a8a428"
+    }
+  ],
+  "error": null
+}

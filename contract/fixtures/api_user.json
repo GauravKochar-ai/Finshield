@@ -1,0 +1,39 @@
+{
+  "data": {
+    "user_id": "u-017",
+    "name_pseudo": "SAMPLE-Ops-017",
+    "team": "ops",
+    "role": "ops_admin",
+    "is_admin": true,
+    "is_service": false,
+    "office_start": "09:00",
+    "office_end": "18:00",
+    "home_city": "Pune",
+    "devices": [
+      "d-pune-12"
+    ],
+    "partner_id": null,
+    "iam_principal_arn": "arn:aws:iam::000000000000:role/finshield-dev-demo-ops-admin",
+    "baseline": {
+      "p95_15min": 2,
+      "avg_daily": 14,
+      "usual_hours": "09:00-18:00",
+      "cities": [
+        "Pune"
+      ],
+      "devices": [
+        "d-pune-12"
+      ],
+      "p95_disburse_inr": null
+    },
+    "recent_risk": [
+      {
+        "alert_id": "ALR-20261120-0007",
+        "score": 96,
+        "severity": "CRITICAL",
+        "detected_at": "2026-11-20T23:49:02+05:30"
+      }
+    ]
+  },
+  "error": null
+}

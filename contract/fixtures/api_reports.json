@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "alert_id": "ALR-20261120-0007",
+      "report_type": "RBI_INCIDENT",
+      "status": "DRAFT",
+      "body_md": "# RBI incident report (SAMPLE draft)\n\nDetected at 2026-11-20T23:49:02+05:30. 212 KYC files, 198 customers. Readiness timer: 6 h.",
+      "model_id": "SAMPLE-model",
+      "generated_at": "2026-11-20T23:49:20+05:30"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "report_type": "CERTIN_FORM",
+      "status": "DRAFT",
+      "body_md": "# CERT-In incident form (SAMPLE draft)\n\nType: unauthorised data access. Readiness timer: 6 h.",
+      "model_id": "SAMPLE-model",
+      "generated_at": "2026-11-20T23:49:20+05:30"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "report_type": "DPB_NOTICE",
+      "status": "DRAFT",
+      "body_md": "# Data Protection Board notice (SAMPLE draft)\n\nDetailed report readiness timer: 72 h. DPDP-aligned readiness and controls.",
+      "model_id": "SAMPLE-model",
+      "generated_at": "2026-11-20T23:49:20+05:30"
+    },
+    {
+      "alert_id": "ALR-20261120-0007",
+      "report_type": "CUSTOMER_NOTICE",
+      "status": "DRAFT",
+      "body_md": "# Customer notice (SAMPLE draft)\n\nWe detected unauthorised access to KYC documents.",
+      "model_id": "SAMPLE-model",
+      "generated_at": "2026-11-20T23:49:20+05:30"
+    }
+  ],
+  "error": null
+}

@@ -1,0 +1,42 @@
+{
+  "headline": "Privileged ops account bulk-exported 212 KYC files off-hours and sent them to an external share",
+  "summary": "SAMPLE. An operations admin assumed the KYC-Emergency role at 23:40 from a new device and a second city, then downloaded 212 KYC files in 15 minutes, 106 times the usual rate. The files were uploaded to a destination that is not on the allowlist. 198 customers are affected.",
+  "why_unusual": [
+    "212 downloads vs usual 2 per 15 min (106x)",
+    "Emergency role assumed with no covering approval",
+    "New device and a second city within one hour",
+    "Activity at 23:40, outside usual hours",
+    "Upload to non-allowlisted destination files.example-share.com"
+  ],
+  "rules_affected": [
+    {
+      "regulation": "DPDP Act 2023",
+      "clause": "Sec 8(5)",
+      "why": "Reasonable security safeguards to prevent a personal data breach (verify clause)."
+    },
+    {
+      "regulation": "CERT-In Directions 2022",
+      "clause": "Para (i)",
+      "why": "Report cyber incidents within 6 hours (verify clause)."
+    }
+  ],
+  "root_cause_hypotheses": [
+    "Compromised privileged credentials",
+    "Insider misuse of the emergency role"
+  ],
+  "affected_assets": [
+    "finshield-dev-kyc-docs"
+  ],
+  "recommended_actions": [
+    "Keep sessions revoked and bucket deny in place",
+    "Approve lock-down of the principal",
+    "Prepare RBI and CERT-In reports before the 6 h timers"
+  ],
+  "confidence": "high",
+  "confidence_reason": "Five independent signals agree and the volume is far outside baseline.",
+  "numbers_used": {
+    "downloads_15m": 212,
+    "customers_affected": 198,
+    "score": 96
+  }
+}

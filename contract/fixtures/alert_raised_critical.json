@@ -1,0 +1,9 @@
+{
+  "alert_id": "ALR-20261120-0007",
+  "severity": "CRITICAL",
+  "previous_severity": null,
+  "score": 96,
+  "user_id": "u-017",
+  "principal_arn": "arn:aws:iam::000000000000:role/finshield-dev-demo-ops-admin",
+  "detected_at": "2026-11-20T23:49:02+05:30"
+}

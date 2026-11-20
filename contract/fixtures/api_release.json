@@ -1,0 +1,29 @@
+{
+  "data": {
+    "alert_id": "ALR-20261120-0007",
+    "status": "RELEASED",
+    "released": [
+      {
+        "action": "REVOKE_SESSIONS",
+        "mode": "LIVE",
+        "result": "RELEASED"
+      },
+      {
+        "action": "DEACTIVATE_KEYS",
+        "mode": "LIVE",
+        "result": "RELEASED"
+      },
+      {
+        "action": "BUCKET_DENY",
+        "mode": "LIVE",
+        "result": "RELEASED"
+      },
+      {
+        "action": "DNS_BLOCK",
+        "mode": "DRY_RUN",
+        "result": "RELEASED"
+      }
+    ]
+  },
+  "error": null
+}

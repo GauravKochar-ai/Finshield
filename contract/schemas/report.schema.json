@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://finshield.local/contract/schemas/report.schema.json",
+  "title": "Report draft",
+  "type": "object",
+  "required": ["alert_id", "report_type", "status", "body_md", "model_id", "generated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "alert_id": { "type": "string" },
+    "report_type": { "enum": ["RBI_INCIDENT", "CERTIN_FORM", "DPB_NOTICE", "CUSTOMER_NOTICE"] },
+    "status": { "enum": ["PENDING", "DRAFT", "FALLBACK", "FAILED"] },
+    "body_md": { "type": "string" },
+    "model_id": { "type": "string" },
+    "generated_at": { "type": "string" }
+  }
+}

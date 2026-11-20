@@ -1,0 +1,111 @@
+{
+  "data": {
+    "run_id": "RUN-20261120-001",
+    "ran_at": "2026-11-20T23:30:00+05:30",
+    "passed": 11,
+    "total": 11,
+    "false_alerts_normal_days": 0,
+    "rows": [
+      {
+        "scenario_id": "SC-01",
+        "expected_level": "CRITICAL",
+        "actual_level": "CRITICAL",
+        "expected_score": 96,
+        "actual_score": 96,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      },
+      {
+        "scenario_id": "SC-01b",
+        "expected_level": "CRITICAL",
+        "actual_level": "CRITICAL",
+        "expected_score": 81,
+        "actual_score": 81,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      },
+      {
+        "scenario_id": "SC-02",
+        "expected_level": "LOGGED",
+        "actual_level": "LOGGED",
+        "expected_score": 30,
+        "actual_score": 30,
+        "pass": true,
+        "time_to_alert_ms": null
+      },
+      {
+        "scenario_id": "SC-03",
+        "expected_level": "LOGGED",
+        "actual_level": "LOGGED",
+        "expected_score": 30,
+        "actual_score": 30,
+        "pass": true,
+        "time_to_alert_ms": null
+      },
+      {
+        "scenario_id": "SC-04",
+        "expected_level": "HIGH",
+        "actual_level": "HIGH",
+        "expected_score": 70,
+        "actual_score": 70,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      },
+      {
+        "scenario_id": "SC-05",
+        "expected_level": "LOGGED",
+        "actual_level": "LOGGED",
+        "expected_score": 20,
+        "actual_score": 20,
+        "pass": true,
+        "time_to_alert_ms": null
+      },
+      {
+        "scenario_id": "SC-06",
+        "expected_level": "CRITICAL",
+        "actual_level": "CRITICAL",
+        "expected_score": 100,
+        "actual_score": 100,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      },
+      {
+        "scenario_id": "SC-07",
+        "expected_level": "HIGH",
+        "actual_level": "HIGH",
+        "expected_score": 70,
+        "actual_score": 70,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      },
+      {
+        "scenario_id": "SC-08",
+        "expected_level": "HIGH",
+        "actual_level": "HIGH",
+        "expected_score": 65,
+        "actual_score": 65,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      },
+      {
+        "scenario_id": "SC-09",
+        "expected_level": "MEDIUM",
+        "actual_level": "MEDIUM",
+        "expected_score": 45,
+        "actual_score": 45,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      },
+      {
+        "scenario_id": "SC-10",
+        "expected_level": "MEDIUM",
+        "actual_level": "MEDIUM",
+        "expected_score": 40,
+        "actual_score": 40,
+        "pass": true,
+        "time_to_alert_ms": 12000
+      }
+    ]
+  },
+  "error": null
+}

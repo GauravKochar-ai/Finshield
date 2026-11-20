@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://finshield.local/contract/schemas/ai_explanation.schema.json",
+  "title": "AI explanation",
+  "type": "object",
+  "required": ["headline", "summary", "why_unusual", "rules_affected", "root_cause_hypotheses", "affected_assets", "recommended_actions", "confidence", "confidence_reason", "numbers_used"],
+  "additionalProperties": false,
+  "properties": {
+    "headline": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "why_unusual": { "type": "array", "items": { "type": "string" } },
+    "rules_affected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["regulation", "clause", "why"],
+        "additionalProperties": false,
+        "properties": {
+          "regulation": { "type": "string" },
+          "clause": { "type": "string" },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "root_cause_hypotheses": { "type": "array", "items": { "type": "string" } },
+    "affected_assets": { "type": "array", "items": { "type": "string" } },
+    "recommended_actions": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "enum": ["high", "medium", "low"] },
+    "confidence_reason": { "type": "string" },
+    "numbers_used": { "type": "object", "additionalProperties": { "type": "number" } }
+  }
+}

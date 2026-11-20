@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://finshield.local/contract/schemas/event.schema.json",
+  "title": "Unified event",
+  "type": "object",
+  "required": ["event_id", "ts", "source", "user_id", "action"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": { "type": "string", "minLength": 1 },
+    "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+05:30$" },
+    "source": { "enum": ["simulator", "cloudtrail", "guardduty", "config", "app"] },
+    "scenario_id": { "type": ["string", "null"] },
+    "is_replay": { "type": ["boolean", "null"] },
+    "user_id": { "type": "string", "minLength": 1 },
+    "principal_arn": { "type": ["string", "null"] },
+    "action": {
+      "enum": ["LOGIN", "MFA_PUSH", "ASSUME_ROLE", "VIEW", "DOWNLOAD", "PRESIGN", "UPLOAD_EXTERNAL", "LOGGING_CHANGE", "BANK_ACCOUNT_CHANGE", "DISBURSE", "CONFIG_NONCOMPLIANT", "GUARDDUTY_FINDING", "KYC_FILE_UPLOADED"]
+    },
+    "object_id": { "type": ["string", "null"] },
+    "customer_id": { "type": ["string", "null"] },
+    "data_class": { "enum": ["KYC", "FINANCIAL", "PII", "NONE", null] },
+    "purpose": { "enum": ["loan_processing", "collections", "marketing", "audit", "registry_upload", null] },
+    "bytes": { "type": ["integer", "null"], "minimum": 0 },
+    "amount_inr": { "type": ["number", "null"], "minimum": 0 },
+    "ip": { "type": ["string", "null"] },
+    "city": { "type": ["string", "null"] },
+    "device_id": { "type": ["string", "null"] },
+    "role": { "type": ["string", "null"] },
+    "destination": { "type": ["string", "null"] },
+    "resource_arn": { "type": ["string", "null"] },
+    "raw_ref": { "type": ["string", "null"] }
+  }
+}

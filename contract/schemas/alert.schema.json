@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://finshield.local/contract/schemas/alert.schema.json",
+  "title": "Alert",
+  "type": "object",
+  "required": ["alert_id", "user_id", "principal_arn", "score", "severity", "status", "signals", "exceptions_applied", "customers_affected", "data_classes", "event_ids", "detected_at", "window_start", "scenario_id", "deadlines", "containment", "ai", "ai_status", "execution_arn"],
+  "additionalProperties": false,
+  "properties": {
+    "alert_id": { "type": "string", "pattern": "^ALR-\\d{8}-\\d{4}$" },
+    "user_id": { "type": "string" },
+    "principal_arn": { "type": ["string", "null"] },
+    "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM"] },
+    "status": { "enum": ["OPEN", "CONTAINED", "AWAITING_APPROVAL", "LOCKED", "RELEASED", "CLOSED"] },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "points", "facts"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string", "pattern": "^S([1-9]|1[01])$" },
+          "points": { "type": "number" },
+          "facts": { "type": "object" }
+        }
+      }
+    },
+    "exceptions_applied": { "type": "array", "items": { "type": "string", "pattern": "^E[1-3]$" } },
+    "customers_affected": { "type": "integer", "minimum": 0 },
+    "data_classes": { "type": "array", "items": { "enum": ["KYC", "FINANCIAL", "PII", "NONE"] } },
+    "event_ids": { "type": "array", "items": { "type": "string" } },
+    "detected_at": { "type": "string" },
+    "window_start": { "type": "string" },
+    "scenario_id": { "type": ["string", "null"] },
+    "deadlines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["body", "due_at"],
+        "additionalProperties": false,
+        "properties": {
+          "body": { "enum": ["RBI", "CERT-In", "DPB"] },
+          "due_at": { "type": "string" }
+        }
+      }
+    },
+    "containment": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "mode", "result", "at"],
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string" },
+          "mode": { "enum": ["LIVE", "DRY_RUN"] },
+          "result": { "type": "string" },
+          "at": { "type": "string" },
+          "detail": { "type": ["string", "object", "null"] }
+        }
+      }
+    },
+    "ai": { "oneOf": [{ "$ref": "ai_explanation.schema.json" }, { "type": "null" }] },
+    "ai_status": { "enum": ["PENDING", "OK", "FALLBACK"] },
+    "execution_arn": { "type": ["string", "null"] }
+  }
+}

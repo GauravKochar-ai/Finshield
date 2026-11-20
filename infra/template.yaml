@@ -1,0 +1,1667 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  FinShield AI (hackathon PoC). DPDP-aligned readiness and controls. Single SAM template, ap-south-1.
+  All Lambdas are STUBS (log the event and return OK) until their module owner replaces them.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev]
+    Description: Stage name. Every resource is named finshield-STAGE-name.
+  AlertEmail:
+    Type: String
+    Default: alerts@example.com
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: Email for SNS alert notifications (confirm the subscription email after deploy).
+  ContainmentMode:
+    Type: String
+    Default: DRY_RUN
+    AllowedValues: [LIVE, DRY_RUN]
+    Description: Initial value of the SSM parameter containment_mode.
+  CreateGuardDutyDetector:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create a GuardDuty detector. Leave false if the account already has one.
+  EnableConfigRules:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create the 3 AWS Config managed rules. Needs a Config recorder in the account.
+  EnableDnsFirewall:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create Route 53 Resolver DNS Firewall resources (P2). Needs VpcId.
+  CreateConfigRecorder:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Extra to the playbook list. Create a Config recorder and delivery channel; only when the account has none.
+  VpcId:
+    Type: String
+    Default: ''
+    Description: VPC to associate the DNS Firewall rule group with. Required only when EnableDnsFirewall is true.
+  BedrockModelId:
+    Type: String
+    Default: NONE
+    Description: Bedrock model or inference profile id for SSM bedrock_model_id. NONE makes the AI layer use its template fallback.
+
+Conditions:
+  CreateGuardDuty: !Equals [!Ref CreateGuardDutyDetector, 'true']
+  CreateConfigRules: !Equals [!Ref EnableConfigRules, 'true']
+  CreateRecorder: !Equals [!Ref CreateConfigRecorder, 'true']
+  CreateDnsFirewall: !And
+    - !Equals [!Ref EnableDnsFirewall, 'true']
+    - !Not [!Equals [!Ref VpcId, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    MemorySize: 512
+    Timeout: 30
+    Handler: app.handler
+    Layers: [!Ref FinshieldLayer]
+    Tags:
+      project: finshield
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        EVENT_BUS_NAME: !Sub finshield-${Stage}-bus
+        FINSHIELD_LOG_LEVEL: INFO
+        KYC_BUCKET: !Ref KycBucket
+        RAW_BUCKET: !Ref RawBucket
+        RULES_BUCKET: !Ref RulesBucket
+        EVIDENCE_BUCKET: !Ref EvidenceBucket
+        ALERT_TOPIC_ARN: !Ref AlertTopic
+        TABLE_USERS: !Ref UsersTable
+        TABLE_CUSTOMERS: !Ref CustomersTable
+        TABLE_KYCFILES: !Ref KycFilesTable
+        TABLE_EVENTS: !Ref EventsTable
+        TABLE_COUNTERS: !Ref CountersTable
+        TABLE_BASELINES: !Ref BaselinesTable
+        TABLE_APPROVALS: !Ref ApprovalsTable
+        TABLE_CONSENT: !Ref ConsentTable
+        TABLE_ALERTS: !Ref AlertsTable
+        TABLE_EVIDENCE: !Ref EvidenceTable
+        TABLE_REPORTS: !Ref ReportsTable
+        TABLE_POSTURE: !Ref PostureTable
+        TABLE_ACCURACYRUNS: !Ref AccuracyRunsTable
+
+Resources:
+  # ===================== Key, layer, bus, topic =====================
+  DataKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub finshield-${Stage} data key (tables, KYC bucket)
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdmin
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: UseThroughDynamoDbAndS3InThisAccount
+            Effect: Allow
+            Principal: { AWS: '*' }
+            Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey, kms:CreateGrant]
+            Resource: '*'
+            Condition:
+              StringEquals:
+                kms:CallerAccount: !Ref AWS::AccountId
+              StringLike:
+                kms:ViaService: [!Sub 'dynamodb.${AWS::Region}.amazonaws.com', !Sub 's3.${AWS::Region}.amazonaws.com']
+  DataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/finshield-${Stage}-data
+      TargetKeyId: !Ref DataKey
+
+  FinshieldLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub finshield-${Stage}-shared
+      Description: finshield shared package, contract data and Python dependencies (built by make layer)
+      ContentUri: ../build/layer
+      CompatibleRuntimes: [python3.12]
+      CompatibleArchitectures: [arm64]
+      RetentionPolicy: Delete
+
+  Bus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub finshield-${Stage}-bus
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub finshield-${Stage}-alerts
+  AlertTopicEmail:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ===================== SSM runtime settings =====================
+  SsmContainmentMode:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /finshield/${Stage}/containment_mode
+      Type: String
+      Value: !Ref ContainmentMode
+      Description: LIVE or DRY_RUN
+  SsmBedrockModelId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /finshield/${Stage}/bedrock_model_id
+      Type: String
+      Value: !Ref BedrockModelId
+  SsmGuardrailId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /finshield/${Stage}/guardrail_id
+      Type: String
+      Value: !GetAtt Guardrail.GuardrailId
+  SsmGuardrailVersion:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /finshield/${Stage}/guardrail_version
+      Type: String
+      Value: !GetAtt GuardrailVersion.Version
+  SsmKbId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /finshield/${Stage}/kb_id
+      Type: String
+      Value: NONE
+      Description: Knowledge Base id. NONE (SSM cannot hold an empty value) means inject regulation text into the prompt.
+  SsmAlertEmail:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /finshield/${Stage}/alert_email
+      Type: String
+      Value: !Ref AlertEmail
+
+  # ===================== HTTP API and Cognito =====================
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub finshield-${Stage}-users
+      AdminCreateUserConfig: { AllowAdminCreateUserOnly: true }
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Policies:
+        PasswordPolicy: { MinimumLength: 12, RequireLowercase: true, RequireUppercase: true, RequireNumbers: true, RequireSymbols: true }
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub finshield-${Stage}-web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+  GroupAnalyst:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { GroupName: Analyst, UserPoolId: !Ref UserPool }
+  GroupSecurityHead:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { GroupName: SecurityHead, UserPoolId: !Ref UserPool }
+  GroupComplianceHead:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { GroupName: ComplianceHead, UserPoolId: !Ref UserPool }
+  GroupAuditor:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { GroupName: Auditor, UserPoolId: !Ref UserPool, Description: Read-only }
+  GroupAdmin:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { GroupName: Admin, UserPoolId: !Ref UserPool }
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Tags: { project: finshield }
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [authorization, content-type]
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+              audience: [!Ref UserPoolClient]
+
+
+
+  # ===================== DynamoDB (on-demand, PITR, KMS) =====================
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Users
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: user_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: user_id, KeyType: HASH }
+
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Customers
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: customer_id, AttributeType: S }
+        - { AttributeName: partner_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: customer_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: partner-index
+          KeySchema:
+            - { AttributeName: partner_id, KeyType: HASH }
+          Projection: { ProjectionType: ALL }
+
+  KycFilesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-KycFiles
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: file_id, AttributeType: S }
+        - { AttributeName: customer_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: file_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: customer-index
+          KeySchema:
+            - { AttributeName: customer_id, KeyType: HASH }
+          Projection: { ProjectionType: ALL }
+
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Events
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: user_id, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: scenario_id, AttributeType: S }
+        - { AttributeName: ts, AttributeType: S }
+      KeySchema:
+        - { AttributeName: user_id, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: scenario-ts-index
+          KeySchema:
+            - { AttributeName: scenario_id, KeyType: HASH }
+            - { AttributeName: ts, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  CountersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Counters
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: bucket_start, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: bucket_start, KeyType: RANGE }
+
+  BaselinesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Baselines
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: subject_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: subject_id, KeyType: HASH }
+
+  ApprovalsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Approvals
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: approval_id, AttributeType: S }
+        - { AttributeName: subject_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: approval_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: subject-index
+          KeySchema:
+            - { AttributeName: subject_id, KeyType: HASH }
+          Projection: { ProjectionType: ALL }
+
+  ConsentTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Consent
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: customer_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: customer_id, KeyType: HASH }
+
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Alerts
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: alert_id, AttributeType: S }
+        - { AttributeName: user_id, AttributeType: S }
+        - { AttributeName: detected_at, AttributeType: S }
+        - { AttributeName: status, AttributeType: S }
+      KeySchema:
+        - { AttributeName: alert_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: user-detected-index
+          KeySchema:
+            - { AttributeName: user_id, KeyType: HASH }
+            - { AttributeName: detected_at, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: status-detected-index
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: detected_at, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  EvidenceTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Evidence
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: alert_id, AttributeType: S }
+        - { AttributeName: seq, AttributeType: N }
+      KeySchema:
+        - { AttributeName: alert_id, KeyType: HASH }
+        - { AttributeName: seq, KeyType: RANGE }
+
+  ReportsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Reports
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: alert_id, AttributeType: S }
+        - { AttributeName: report_type, AttributeType: S }
+      KeySchema:
+        - { AttributeName: alert_id, KeyType: HASH }
+        - { AttributeName: report_type, KeyType: RANGE }
+
+  PostureTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-Posture
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: control_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: control_id, KeyType: HASH }
+
+  AccuracyRunsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-AccuracyRuns
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: run_id, AttributeType: S }
+        - { AttributeName: scenario_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: run_id, KeyType: HASH }
+        - { AttributeName: scenario_id, KeyType: RANGE }
+
+  # ===================== Lambda functions (all STUBS until owners replace them) =====================
+  NormalizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-normalizer
+      Description: "Normalize Raw Activity, CloudTrail, GuardDuty and Config events into the unified event (M3)"
+      CodeUri: ../backend/functions/normalizer/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PostureTable
+        - S3WritePolicy:
+            BucketName: !Ref RawBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref Bus
+      Events:
+        RawRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref Bus
+            Pattern: {"detail-type": ["Raw Activity", "AWS API Call via CloudTrail", "AWS Console Sign In via CloudTrail", "GuardDuty Finding", "Config Rules Compliance Change"]}
+
+  DetectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-detection
+      Description: "Counters, signs S1-S11, exceptions, incident dedup, Alert Raised (M3)"
+      CodeUri: ../backend/functions/detection/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CountersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref BaselinesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ApprovalsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConsentTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomersTable
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref Bus
+      Events:
+        NormalizedRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref Bus
+            Pattern: {"detail-type": ["Normalized Event"]}
+
+  BaselineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-baseline
+      Description: "Hourly baselines per user and team (M3)"
+      CodeUri: ../backend/functions/baseline/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BaselinesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        Hourly:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+
+  StartIncidentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-start-incident
+      Description: "Starts the incident state machine; execution name = <alert_id>-<severity> (M4)"
+      CodeUri: ../backend/functions/start_incident/
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:finshield-${Stage}-incident'
+      Policies:
+        - Statement:
+            - Sid: StartIncident
+              Effect: Allow
+              Action: [states:StartExecution]
+              Resource: !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:finshield-${Stage}-incident'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+      Events:
+        AlertRaisedRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref Bus
+            Pattern: {"detail-type": ["Alert Raised"]}
+
+  SetDeadlinesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-set-deadlines
+      Description: "Compute RBI, CERT-In and DPB readiness timers from detected_at (M4)"
+      CodeUri: ../backend/functions/set_deadlines/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  EvidenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-evidence
+      Description: "Evidence append, verify and export to the Object Lock bucket (M4)"
+      CodeUri: ../backend/functions/evidence/
+      Policies:
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - S3WritePolicy:
+            BucketName: !Ref EvidenceBucket
+        - Statement:
+            - Sid: ObjectLockRetention
+              Effect: Allow
+              Action: [s3:PutObjectRetention]
+              Resource: !Sub '${EvidenceBucket.Arn}/*'
+
+  ContainRevokeSessionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-contain-revoke-sessions
+      Description: "Inline deny on aws:TokenIssueTime for the principal (M4)"
+      CodeUri: ../backend/functions/contain_revoke_sessions/
+      Policies:
+        - Statement:
+            - Sid: IamInlineDeny
+              Effect: Allow
+              Action: [iam:PutRolePolicy, iam:PutUserPolicy, iam:DeleteRolePolicy, iam:DeleteUserPolicy]
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/finshield-${Stage}-demo-*'
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:user/finshield-${Stage}-demo-*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  ContainDeactivateKeysFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-contain-deactivate-keys
+      Description: "Deactivate access keys of the principal (M4)"
+      CodeUri: ../backend/functions/contain_deactivate_keys/
+      Policies:
+        - Statement:
+            - Sid: IamKeys
+              Effect: Allow
+              Action: [iam:ListAccessKeys, iam:UpdateAccessKey]
+              Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:user/finshield-${Stage}-demo-*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  ContainBucketDenyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-contain-bucket-deny
+      Description: "Bucket policy statement FinShieldDeny<user> on the KYC bucket (M4)"
+      CodeUri: ../backend/functions/contain_bucket_deny/
+      Policies:
+        - Statement:
+            - Sid: KycBucketPolicy
+              Effect: Allow
+              Action: [s3:GetBucketPolicy, s3:PutBucketPolicy, s3:DeleteBucketPolicy]
+              Resource: !GetAtt KycBucket.Arn
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  ContainDnsBlockFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-contain-dns-block
+      Description: "Route 53 Resolver DNS Firewall block (P2, behind EnableDnsFirewall)"
+      CodeUri: ../backend/functions/contain_dns_block/
+      Policies:
+        - Statement:
+            - Sid: DnsFirewall
+              Effect: Allow
+              Action: [route53resolver:CreateFirewallRule, route53resolver:DeleteFirewallRule, route53resolver:UpdateFirewallDomains, route53resolver:ListFirewallRules]
+              Resource: '*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  DecisionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-decision
+      Description: "Stores the task token; POST /decision sends success or failure (M4)"
+      CodeUri: ../backend/functions/decision/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - Statement:
+            - Sid: TaskToken
+              Effect: Allow
+              Action: [states:SendTaskSuccess, states:SendTaskFailure]
+              Resource: '*'
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        Http1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/alerts/{id}/decision
+
+  QuarantineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-quarantine
+      Description: "After APPROVE: quarantine policy, console off, status LOCKED (M4)"
+      CodeUri: ../backend/functions/quarantine/
+      Policies:
+        - Statement:
+            - Sid: IamQuarantine
+              Effect: Allow
+              Action: [iam:PutRolePolicy, iam:PutUserPolicy, iam:DeleteLoginProfile]
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/finshield-${Stage}-demo-*'
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:user/finshield-${Stage}-demo-*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  ReleaseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-release
+      Description: "Undo all containment (M4)"
+      CodeUri: ../backend/functions/release/
+      Policies:
+        - Statement:
+            - Sid: IamRelease
+              Effect: Allow
+              Action: [iam:DeleteRolePolicy, iam:DeleteUserPolicy, iam:UpdateAccessKey, iam:ListAccessKeys, iam:GetLoginProfile]
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/finshield-${Stage}-demo-*'
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:user/finshield-${Stage}-demo-*'
+        - Statement:
+            - Sid: KycBucketPolicy
+              Effect: Allow
+              Action: [s3:GetBucketPolicy, s3:PutBucketPolicy, s3:DeleteBucketPolicy]
+              Resource: !GetAtt KycBucket.Arn
+        - Statement:
+            - Sid: DnsRelease
+              Effect: Allow
+              Action: [route53resolver:DeleteFirewallRule]
+              Resource: '*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        Http1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/alerts/{id}/release
+
+  TamperDemoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-tamper-demo
+      Description: "Edits a copy of the chain and runs verify (M4); read-only on Evidence"
+      CodeUri: ../backend/functions/tamper_demo/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EvidenceTable
+      Events:
+        Http1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/alerts/{id}/evidence/tamper-demo
+
+  AiExplainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-ai-explain
+      Description: "Bedrock explanation with number check and template fallback (M5)"
+      CodeUri: ../backend/functions/ai_explain/
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Sid: BedrockConverse
+              Effect: Allow
+              Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
+              Resource: '*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - S3ReadPolicy:
+            BucketName: !Ref RulesBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  AiReportsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-ai-reports
+      Description: "Four report drafts (M5)"
+      CodeUri: ../backend/functions/ai_reports/
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Sid: BedrockConverse
+              Effect: Allow
+              Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
+              Resource: '*'
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReportsTable
+        - Statement:
+            - Sid: EvidenceAppendOnly
+              Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt EvidenceTable.Arn
+        - S3ReadPolicy:
+            BucketName: !Ref RulesBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+
+  AskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-ask
+      Description: "Ask FinShield, answers only about the given case (M5)"
+      CodeUri: ../backend/functions/ask/
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Sid: BedrockConverse
+              Effect: Allow
+              Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
+              Resource: '*'
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref EvidenceTable
+        - S3ReadPolicy:
+            BucketName: !Ref RulesBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        Http1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/alerts/{id}/ask
+
+  KycLabelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-kyc-label
+      Description: "Bedrock image labelling on KYC upload (M5, P2)"
+      CodeUri: ../backend/functions/kyc_label/
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Sid: BedrockConverse
+              Effect: Allow
+              Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
+              Resource: '*'
+        - S3ReadPolicy:
+            BucketName: !Ref KycBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref KycFilesTable
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref Bus
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        KycUploaded:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.s3]
+              detail-type: [Object Created]
+              detail:
+                bucket:
+                  name: [!Ref KycBucket]
+
+  SimulatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-simulator
+      Description: "Replay a scenario with timestamps rewritten to now, or reset (M7)"
+      CodeUri: ../backend/functions/simulator/
+      Policies:
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref Bus
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CountersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - S3ReadPolicy:
+            BucketName: !Ref RulesBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        Http1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/simulate
+
+  TestRunnerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-test-runner
+      Description: "Run all scenarios plus 7 normal days, write AccuracyRuns (M7)"
+      CodeUri: ../backend/functions/test_runner/
+      Timeout: 300
+      Environment:
+        Variables:
+          SIMULATOR_FUNCTION_NAME: !Sub 'finshield-${Stage}-simulator'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AccuracyRunsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - Statement:
+            - Sid: InvokeSimulator
+              Effect: Allow
+              Action: [lambda:InvokeFunction]
+              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:finshield-${Stage}-simulator'
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        Http1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/accuracy/run
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-api
+      Description: "Read API handlers and approvals (M7); also evidence verify via the layer"
+      CodeUri: ../backend/functions/api/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref KycFilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref BaselinesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConsentTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ReportsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PostureTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AccuracyRunsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ApprovalsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref EvidenceTable
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        Http1:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/posture
+        Http2:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/alerts
+        Http3:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/alerts/{id}
+        Http4:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/alerts/{id}/timeline
+        Http5:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/alerts/{id}/evidence
+        Http6:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/alerts/{id}/evidence/verify
+        Http7:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/alerts/{id}/reports
+        Http8:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/users/{id}
+        Http9:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/rules
+        Http10:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/compliance
+        Http11:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/privacy
+        Http12:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/approvals
+        Http13:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/approvals
+        Http14:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/accuracy
+
+  # ===================== S3 buckets =====================
+  KycBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub finshield-${Stage}-kyc-docs
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault: { SSEAlgorithm: 'aws:kms', KMSMasterKeyID: !GetAtt DataKey.Arn }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      NotificationConfiguration:
+        EventBridgeConfiguration: { EventBridgeEnabled: true }
+      Tags: [{ Key: project, Value: finshield }]
+  KycBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref KycBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt KycBucket.Arn, !Sub '${KycBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub finshield-${Stage}-raw-events
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      LifecycleConfiguration:
+        Rules:
+          - { Id: expire-1y, Status: Enabled, ExpirationInDays: 365 }
+      Tags: [{ Key: project, Value: finshield }]
+  RulesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub finshield-${Stage}-rules
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      Tags: [{ Key: project, Value: finshield }]
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub finshield-${Stage}-evidence
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention: { Mode: COMPLIANCE, Days: 365 }
+      VersioningConfiguration: { Status: Enabled }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      Tags: [{ Key: project, Value: finshield }]
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub finshield-${Stage}-web
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      Tags: [{ Key: project, Value: finshield }]
+  ExternalSimBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub finshield-${Stage}-external-sim
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      LifecycleConfiguration:
+        Rules:
+          - { Id: expire-7d, Status: Enabled, ExpirationInDays: 7 }
+      Tags: [{ Key: project, Value: finshield }]
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub finshield-${Stage}-trail-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      LifecycleConfiguration:
+        Rules:
+          - { Id: expire-90d, Status: Enabled, ExpirationInDays: 90 }
+      Tags: [{ Key: project, Value: finshield }]
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudTrailAclCheck
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: 's3:GetBucketAcl'
+            Resource: !GetAtt TrailBucket.Arn
+          - Sid: CloudTrailWrite
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: 's3:PutObject'
+            Resource: !Sub '${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition: { StringEquals: { 's3:x-amz-acl': 'bucket-owner-full-control' } }
+
+  # ===================== CloudTrail (S3 data events on the KYC bucket only) =====================
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName: !Sub finshield-${Stage}-trail
+      S3BucketName: !Ref TrailBucket
+      IsLogging: true
+      IsMultiRegionTrail: false
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+          DataResources:
+            - Type: AWS::S3::Object
+              Values: [!Sub '${KycBucket.Arn}/']
+      Tags: [{ Key: project, Value: finshield }]
+
+  # ===================== Default bus forwarding rules =====================
+  ForwardRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub finshield-${Stage}-forward-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: events.amazonaws.com }, Action: 'sts:AssumeRole' }]
+      Policies:
+        - PolicyName: put-events-to-finshield-bus
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement: [{ Effect: Allow, Action: 'events:PutEvents', Resource: !GetAtt Bus.Arn }]
+  ForwardKycS3Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub finshield-${Stage}-fwd-kyc-s3
+      EventPattern:
+        source: [aws.s3]
+        detail-type: [AWS API Call via CloudTrail]
+        detail:
+          requestParameters:
+            bucketName: [!Ref KycBucket]
+      Targets: [{ Id: finshield-bus, Arn: !GetAtt Bus.Arn, RoleArn: !GetAtt ForwardRole.Arn }]
+  ForwardIdentityRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub finshield-${Stage}-fwd-identity
+      EventPattern:
+        source: [aws.signin, aws.sts, aws.cloudtrail]
+        detail-type: [AWS API Call via CloudTrail, AWS Console Sign In via CloudTrail]
+      Targets: [{ Id: finshield-bus, Arn: !GetAtt Bus.Arn, RoleArn: !GetAtt ForwardRole.Arn }]
+  ForwardGuardDutyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub finshield-${Stage}-fwd-guardduty
+      EventPattern:
+        source: [aws.guardduty]
+        detail-type: [GuardDuty Finding]
+      Targets: [{ Id: finshield-bus, Arn: !GetAtt Bus.Arn, RoleArn: !GetAtt ForwardRole.Arn }]
+  ForwardConfigRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub finshield-${Stage}-fwd-config
+      EventPattern:
+        source: [aws.config]
+        detail-type: [Config Rules Compliance Change]
+      Targets: [{ Id: finshield-bus, Arn: !GetAtt Bus.Arn, RoleArn: !GetAtt ForwardRole.Arn }]
+
+  # ===================== Step Functions =====================
+  IncidentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/finshield-${Stage}-incident
+      RetentionInDays: 14
+  IncidentStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub finshield-${Stage}-incident
+      Type: STANDARD
+      DefinitionUri: ../backend/statemachines/incident.asl.json
+      DefinitionSubstitutions:
+        EvidenceFnArn: !GetAtt EvidenceFunction.Arn
+        SetDeadlinesFnArn: !GetAtt SetDeadlinesFunction.Arn
+        RevokeFnArn: !GetAtt ContainRevokeSessionsFunction.Arn
+        DeactivateFnArn: !GetAtt ContainDeactivateKeysFunction.Arn
+        BucketDenyFnArn: !GetAtt ContainBucketDenyFunction.Arn
+        DnsBlockFnArn: !GetAtt ContainDnsBlockFunction.Arn
+        AiExplainFnArn: !GetAtt AiExplainFunction.Arn
+        AiReportsFnArn: !GetAtt AiReportsFunction.Arn
+        DecisionFnArn: !GetAtt DecisionFunction.Arn
+        QuarantineFnArn: !GetAtt QuarantineFunction.Arn
+        AlertTopicArn: !Ref AlertTopic
+        ContainmentMode: !Ref ContainmentMode
+      Logging:
+        Level: ERROR
+        IncludeExecutionData: false
+        Destinations:
+          - CloudWatchLogsLogGroup: { LogGroupArn: !GetAtt IncidentLogGroup.Arn }
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref EvidenceFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref SetDeadlinesFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref ContainRevokeSessionsFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref ContainDeactivateKeysFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref ContainBucketDenyFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref ContainDnsBlockFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref AiExplainFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref AiReportsFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref DecisionFunction }
+        - LambdaInvokePolicy: { FunctionName: !Ref QuarantineFunction }
+        - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertTopic.TopicName }
+        - Statement:
+            - Effect: Allow
+              Action: [logs:CreateLogDelivery, logs:GetLogDelivery, logs:UpdateLogDelivery, logs:DeleteLogDelivery, logs:ListLogDeliveries, logs:PutResourcePolicy, logs:DescribeResourcePolicies, logs:DescribeLogGroups]
+              Resource: '*'
+      Tags: { project: finshield }
+
+  # ===================== Demo principals (real mode) =====================
+  DemoOpsAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub finshield-${Stage}-demo-ops-admin
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' }, Action: 'sts:AssumeRole' }]
+      Policies:
+        - PolicyName: read-kyc-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - { Effect: Allow, Action: ['s3:GetObject', 's3:ListBucket'], Resource: [!GetAtt KycBucket.Arn, !Sub '${KycBucket.Arn}/*'] }
+              - { Effect: Allow, Action: ['kms:Decrypt'], Resource: !GetAtt DataKey.Arn }
+      Tags: [{ Key: project, Value: finshield }]
+  DemoKycUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub finshield-${Stage}-demo-kyc-user
+      Policies:
+        - PolicyName: kyc-read-and-external-sim-write
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - { Effect: Allow, Action: ['s3:GetObject', 's3:ListBucket'], Resource: [!GetAtt KycBucket.Arn, !Sub '${KycBucket.Arn}/*'] }
+              - { Effect: Allow, Action: ['kms:Decrypt'], Resource: !GetAtt DataKey.Arn }
+              - { Effect: Allow, Action: ['s3:PutObject'], Resource: !Sub '${ExternalSimBucket.Arn}/*' }
+      Tags: [{ Key: project, Value: finshield }]
+  DemoKycUserKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref DemoKycUser
+  DemoKycUserSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub finshield-${Stage}-demo-kyc-user-key
+      Description: Access key for the real-mode demo user (synthetic sandbox principal)
+      SecretString: !Sub '{"AccessKeyId":"${DemoKycUserKey}","SecretAccessKey":"${DemoKycUserKey.SecretAccessKey}"}'
+
+  # ===================== Bedrock Guardrail =====================
+  Guardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub finshield-${Stage}-guardrail
+      Description: Masks names, Aadhaar and PAN on input and output
+      BlockedInputMessaging: Input blocked by FinShield guardrail.
+      BlockedOutputsMessaging: Output blocked by FinShield guardrail.
+      SensitiveInformationPolicyConfig:
+        PiiEntitiesConfig:
+          - { Type: NAME, Action: ANONYMIZE }
+          - { Type: EMAIL, Action: ANONYMIZE }
+          - { Type: PHONE, Action: ANONYMIZE }
+        RegexesConfig:
+          - { Name: aadhaar-12-digit, Description: Aadhaar number, Pattern: '\b\d{4}\s?\d{4}\s?\d{4}\b', Action: ANONYMIZE }
+          - { Name: pan, Description: PAN, Pattern: '[A-Z]{5}[0-9]{4}[A-Z]', Action: ANONYMIZE }
+  GuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !GetAtt Guardrail.GuardrailId
+      Description: Initial version
+
+  # ===================== Config rules, GuardDuty (conditional) =====================
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateRecorder
+    Properties:
+      BucketName: !Sub finshield-${Stage}-config-${AWS::AccountId}
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+  ConfigBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateRecorder
+    Properties:
+      Bucket: !Ref ConfigBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Sid: AclCheck, Effect: Allow, Principal: { Service: config.amazonaws.com }, Action: 's3:GetBucketAcl', Resource: !GetAtt ConfigBucket.Arn }
+          - { Sid: Write, Effect: Allow, Principal: { Service: config.amazonaws.com }, Action: 's3:PutObject', Resource: !Sub '${ConfigBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*', Condition: { StringEquals: { 's3:x-amz-acl': 'bucket-owner-full-control' } } }
+  ConfigRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRecorder
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: config.amazonaws.com }, Action: 'sts:AssumeRole' }]
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWS_ConfigRole']
+      Policies:
+        - PolicyName: deliver
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement: [{ Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${ConfigBucket.Arn}/*' }]
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Condition: CreateRecorder
+    Properties:
+      RoleARN: !GetAtt ConfigRole.Arn
+      RecordingGroup: { AllSupported: true, IncludeGlobalResourceTypes: true }
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Condition: CreateRecorder
+    Properties:
+      S3BucketName: !Ref ConfigBucket
+  ConfigRuleS3Public:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfigRules
+    Properties:
+      ConfigRuleName: !Sub finshield-${Stage}-s3-bucket-public-read-prohibited
+      Source: { Owner: AWS, SourceIdentifier: S3_BUCKET_PUBLIC_READ_PROHIBITED }
+  ConfigRuleCloudTrail:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfigRules
+    Properties:
+      ConfigRuleName: !Sub finshield-${Stage}-cloudtrail-enabled
+      Source: { Owner: AWS, SourceIdentifier: CLOUD_TRAIL_ENABLED }
+  ConfigRuleMfa:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfigRules
+    Properties:
+      ConfigRuleName: !Sub finshield-${Stage}-mfa-enabled-for-iam-console-access
+      Source: { Owner: AWS, SourceIdentifier: MFA_ENABLED_FOR_IAM_CONSOLE_ACCESS }
+  GuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Condition: CreateGuardDuty
+    Properties:
+      Enable: true
+
+  # ===================== DNS Firewall (P2, conditional) =====================
+  BlockedDomains:
+    Type: AWS::Route53Resolver::FirewallDomainList
+    Condition: CreateDnsFirewall
+    Properties:
+      Name: !Sub finshield-${Stage}-blocked-destinations
+      Domains: ['files.example-share.com']
+  DnsRuleGroup:
+    Type: AWS::Route53Resolver::FirewallRuleGroup
+    Condition: CreateDnsFirewall
+    Properties:
+      Name: !Sub finshield-${Stage}-rule-group
+      FirewallRules:
+        - FirewallDomainListId: !Ref BlockedDomains
+          Priority: 100
+          Action: BLOCK
+          BlockResponse: NXDOMAIN
+  DnsRuleGroupAssociation:
+    Type: AWS::Route53Resolver::FirewallRuleGroupAssociation
+    Condition: CreateDnsFirewall
+    Properties:
+      Name: !Sub finshield-${Stage}-association
+      FirewallRuleGroupId: !Ref DnsRuleGroup
+      VpcId: !Ref VpcId
+      Priority: 101
+      MutationProtection: DISABLED
+
+  # ===================== CloudFront (OAC) in front of the web bucket =====================
+  WebOac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub finshield-${Stage}-web-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub finshield-${Stage}-web
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: web
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOac.Id
+            S3OriginConfig: { OriginAccessIdentity: '' }
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          Compress: true
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 404, ResponsePagePath: /404.html }
+          - { ErrorCode: 404, ResponseCode: 404, ResponsePagePath: /404.html }
+      Tags: [{ Key: project, Value: finshield }]
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontOac
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: 's3:GetObject'
+            Resource: !Sub '${WebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}'
+
+  # ===================== Monitoring =====================
+  TimeToDetectAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub finshield-${Stage}-time-to-detect
+      AlarmDescription: Time from last event to alert above 60 s (custom metric FinShield/TimeToDetectMs, emitted by detection)
+      Namespace: FinShield
+      MetricName: TimeToDetectMs
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 60000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub finshield-${Stage}
+      DashboardBody: !Sub |
+        {"widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"Time to detect (ms)","region":"${AWS::Region}","stat":"Maximum","period":300,"metrics":[["FinShield","TimeToDetectMs"]]}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Detection errors and duration","region":"${AWS::Region}","period":300,"metrics":[["AWS/Lambda","Errors","FunctionName","finshield-${Stage}-detection"],["AWS/Lambda","Duration","FunctionName","finshield-${Stage}-detection"]]}},
+          {"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"Incident executions","region":"${AWS::Region}","period":300,"metrics":[["AWS/States","ExecutionsStarted","StateMachineArn","arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:finshield-${Stage}-incident"],["AWS/States","ExecutionsFailed","StateMachineArn","arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:finshield-${Stage}-incident"]]}}
+        ]}
+
+Outputs:
+  ApiUrl:
+    Description: Base URL including the /v1 stage
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com/v1'
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  BusName:
+    Value: !Ref Bus
+  StateMachineArn:
+    Value: !Ref IncidentStateMachine
+  WebBucket:
+    Value: !Ref WebBucket
+  CloudFrontUrl:
+    Value: !Sub 'https://${WebDistribution.DomainName}'
+  KycBucket:
+    Value: !Ref KycBucket
+  EvidenceBucket:
+    Value: !Ref EvidenceBucket
+  RulesBucket:
+    Value: !Ref RulesBucket
+  RawBucket:
+    Value: !Ref RawBucket
+  ExternalSimBucket:
+    Value: !Ref ExternalSimBucket
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+  Region:
+    Value: !Ref AWS::Region
+  DemoKeySecretName:
+    Value: !Ref DemoKycUserSecret

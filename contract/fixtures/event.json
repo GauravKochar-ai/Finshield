@@ -1,0 +1,23 @@
+{
+  "event_id": "evt-8f21",
+  "ts": "2026-11-20T23:48:12+05:30",
+  "source": "simulator",
+  "scenario_id": "SC-01",
+  "is_replay": true,
+  "user_id": "u-017",
+  "principal_arn": "arn:aws:iam::000000000000:role/finshield-dev-demo-ops-admin",
+  "action": "DOWNLOAD",
+  "object_id": "KYC-PAN-0042",
+  "customer_id": "C-10442",
+  "data_class": "KYC",
+  "purpose": "loan_processing",
+  "bytes": 2150000,
+  "amount_inr": null,
+  "ip": "49.36.0.0",
+  "city": "Pune",
+  "device_id": "d-new-77",
+  "role": "KYC-Emergency",
+  "destination": null,
+  "resource_arn": null,
+  "raw_ref": "s3://finshield-dev-raw-events/SAMPLE/evt-8f21.json"
+}

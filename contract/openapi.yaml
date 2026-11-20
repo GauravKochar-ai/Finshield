@@ -1,0 +1,662 @@
+openapi: 3.1.0
+$id: https://finshield.local/contract/openapi.yaml
+info:
+  title: FinShield AI REST API
+  version: 1.0.0
+  description: >
+    HTTP API behind a Cognito JWT authorizer. Every response uses the envelope
+    {"data": ..., "error": null}. Errors use {"data": null, "error": {"code", "message"}}.
+    DPDP-aligned readiness and controls. All sample data is synthetic (SAMPLE).
+servers:
+  - url: https://{apiId}.execute-api.ap-south-1.amazonaws.com/v1
+    variables:
+      apiId: { default: example }
+security:
+  - cognito: []
+tags:
+  - { name: alerts }
+  - { name: evidence }
+  - { name: response }
+  - { name: admin }
+
+paths:
+  /posture:
+    get:
+      operationId: getPosture
+      summary: Posture score, alerts by severity, Config results, consent risks, deadlines due soon
+      x-groups: [all]
+      responses:
+        '200': { $ref: '#/components/responses/Posture' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts:
+    get:
+      operationId: listAlerts
+      summary: Alert list
+      x-groups: [all]
+      parameters:
+        - { name: status, in: query, schema: { enum: [OPEN, CONTAINED, AWAITING_APPROVAL, LOCKED, RELEASED, CLOSED] } }
+        - { name: severity, in: query, schema: { enum: [CRITICAL, HIGH, MEDIUM] } }
+      responses:
+        '200': { $ref: '#/components/responses/AlertList' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}:
+    get:
+      operationId: getAlert
+      summary: Alert with AI, signals, deadlines, containment
+      x-groups: [all]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Alert' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/timeline:
+    get:
+      operationId: getAlertTimeline
+      summary: Events that built the alert
+      x-groups: [all]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Timeline' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/evidence:
+    get:
+      operationId: getEvidence
+      summary: Evidence chain
+      x-groups: [all]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Evidence' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/evidence/verify:
+    post:
+      operationId: verifyEvidence
+      summary: Verify the hash chain
+      x-groups: [all]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      responses:
+        '200': { $ref: '#/components/responses/VerifyResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/evidence/tamper-demo:
+    post:
+      operationId: tamperDemo
+      summary: Verify result on a tampered copy of the chain
+      x-groups: [Admin]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      responses:
+        '200': { $ref: '#/components/responses/VerifyResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/decision:
+    post:
+      operationId: decideAlert
+      summary: Approve or reject lock-down; sends the Step Functions task token
+      x-groups: [SecurityHead, ComplianceHead]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              additionalProperties: false
+              properties:
+                decision: { enum: [APPROVE, REJECT] }
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Decision' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/release:
+    post:
+      operationId: releaseAlert
+      summary: Undo containment
+      x-groups: [SecurityHead]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Release' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/reports:
+    get:
+      operationId: getReports
+      summary: The 4 report drafts
+      x-groups: [all]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Reports' }
+        default: { $ref: '#/components/responses/Error' }
+  /alerts/{id}/ask:
+    post:
+      operationId: askFinShield
+      summary: Ask FinShield about this case only
+      x-groups: [Analyst, SecurityHead, ComplianceHead, Admin]
+      parameters: [{ $ref: '#/components/parameters/AlertId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              additionalProperties: false
+              properties:
+                question: { type: string, minLength: 1 }
+      responses:
+        '200': { $ref: '#/components/responses/Ask' }
+        default: { $ref: '#/components/responses/Error' }
+  /users/{id}:
+    get:
+      operationId: getUser
+      summary: Profile, baseline, recent risk
+      x-groups: [all]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/User' }
+        default: { $ref: '#/components/responses/Error' }
+  /rules:
+    get:
+      operationId: getRules
+      summary: Contents of contract/config.json
+      x-groups: [all]
+      responses:
+        '200': { $ref: '#/components/responses/Rules' }
+        default: { $ref: '#/components/responses/Error' }
+  /compliance:
+    get:
+      operationId: getCompliance
+      summary: Control map with status per control (DPDP-aligned readiness and controls)
+      x-groups: [all]
+      responses:
+        '200': { $ref: '#/components/responses/Compliance' }
+        default: { $ref: '#/components/responses/Error' }
+  /privacy:
+    get:
+      operationId: getPrivacy
+      summary: Consent ledger risks, unmasked Aadhaar files, purpose mismatches
+      x-groups: [all]
+      responses:
+        '200': { $ref: '#/components/responses/Privacy' }
+        default: { $ref: '#/components/responses/Error' }
+  /approvals:
+    get:
+      operationId: listApprovals
+      summary: Tickets and scheduled jobs (E1/E2)
+      x-groups: [SecurityHead]
+      responses:
+        '200': { $ref: '#/components/responses/ApprovalList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createApproval
+      summary: Create a ticket or scheduled job
+      x-groups: [SecurityHead]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Approval' }
+        default: { $ref: '#/components/responses/Error' }
+  /simulate:
+    post:
+      operationId: simulate
+      summary: Replay a scenario, trigger a GuardDuty sample, or reset
+      x-groups: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                scenario_id: { type: string, pattern: '^SC-\d{2}b?$' }
+                guardduty_sample: { type: boolean }
+                reset: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/Simulate' }
+        default: { $ref: '#/components/responses/Error' }
+  /accuracy/run:
+    post:
+      operationId: runAccuracy
+      summary: Run all scenarios and 7 normal days
+      x-groups: [Admin]
+      responses:
+        '200': { $ref: '#/components/responses/Accuracy' }
+        default: { $ref: '#/components/responses/Error' }
+  /accuracy:
+    get:
+      operationId: getAccuracy
+      summary: Latest accuracy results
+      x-groups: [Admin]
+      responses:
+        '200': { $ref: '#/components/responses/Accuracy' }
+        default: { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito user pool JWT. Groups Analyst, SecurityHead, ComplianceHead, Auditor (read-only), Admin.
+  parameters:
+    AlertId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^ALR-\d{8}-\d{4}$' }
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    Alert: { $ref: 'schemas/alert.schema.json' }
+    EvidenceEntry: { $ref: 'schemas/evidence_entry.schema.json' }
+    Report: { $ref: 'schemas/report.schema.json' }
+    Event: { $ref: 'schemas/event.schema.json' }
+    VerifyResult:
+      type: object
+      required: [valid, broken_at_seq]
+      additionalProperties: false
+      properties:
+        valid: { type: boolean }
+        broken_at_seq: { type: [integer, 'null'] }
+    Deadline:
+      type: object
+      required: [alert_id, body, due_at, seconds_remaining]
+      properties:
+        alert_id: { type: string }
+        body: { enum: [RBI, CERT-In, DPB] }
+        due_at: { type: string }
+        seconds_remaining: { type: integer }
+    ApprovalInput:
+      type: object
+      required: [type, subject_id, valid_from, valid_to]
+      additionalProperties: false
+      properties:
+        type: { enum: [TICKET, SCHEDULED_JOB] }
+        subject_id: { type: string }
+        max_files: { type: [integer, 'null'] }
+        data_class: { enum: [KYC, FINANCIAL, PII, NONE] }
+        valid_from: { type: string }
+        valid_to: { type: string }
+        approver_id: { type: string }
+        job_id: { type: [string, 'null'] }
+    Approval:
+      type: object
+      required: [approval_id, type, subject_id, valid_from, valid_to]
+      additionalProperties: false
+      properties:
+        approval_id: { type: string }
+        type: { enum: [TICKET, SCHEDULED_JOB] }
+        subject_id: { type: string }
+        max_files: { type: [integer, 'null'] }
+        data_class: { enum: [KYC, FINANCIAL, PII, NONE] }
+        valid_from: { type: string }
+        valid_to: { type: string }
+        approver_id: { type: string }
+        job_id: { type: [string, 'null'] }
+    ControlStatus:
+      type: object
+      required: [control_id, source, status, resource_arn, last_evaluated]
+      properties:
+        control_id: { type: string }
+        source: { enum: [config, guardduty, internal] }
+        status: { enum: [COMPLIANT, NON_COMPLIANT, NOT_APPLICABLE, UNKNOWN] }
+        resource_arn: { type: [string, 'null'] }
+        last_evaluated: { type: string }
+    AccuracyRow:
+      type: object
+      required: [scenario_id, expected_level, actual_level, expected_score, actual_score, pass, time_to_alert_ms]
+      properties:
+        scenario_id: { type: string }
+        expected_level: { enum: [CRITICAL, HIGH, MEDIUM, LOGGED] }
+        actual_level: { enum: [CRITICAL, HIGH, MEDIUM, LOGGED] }
+        expected_score: { type: integer }
+        actual_score: { type: integer }
+        pass: { type: boolean }
+        time_to_alert_ms: { type: [integer, 'null'] }
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              data: { type: 'null' }
+              error: { $ref: '#/components/schemas/Error' }
+    Posture:
+      description: Posture
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [posture_score, alerts_by_severity, config_results, consent_risks, deadlines_due_soon]
+                properties:
+                  posture_score: { type: integer, minimum: 0, maximum: 100 }
+                  alerts_by_severity:
+                    type: object
+                    required: [CRITICAL, HIGH, MEDIUM]
+                    properties:
+                      CRITICAL: { type: integer }
+                      HIGH: { type: integer }
+                      MEDIUM: { type: integer }
+                  config_results:
+                    type: array
+                    items: { $ref: '#/components/schemas/ControlStatus' }
+                  consent_risks:
+                    type: object
+                    required: [purpose_mismatches, withdrawn_consents_accessed]
+                    properties:
+                      purpose_mismatches: { type: integer }
+                      withdrawn_consents_accessed: { type: integer }
+                  deadlines_due_soon:
+                    type: array
+                    items: { $ref: '#/components/schemas/Deadline' }
+    AlertList:
+      description: Alerts
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: array
+                items: { $ref: '#/components/schemas/Alert' }
+    Alert:
+      description: Alert
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data: { $ref: '#/components/schemas/Alert' }
+    Timeline:
+      description: Events that built the alert
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: array
+                items: { $ref: '#/components/schemas/Event' }
+    Evidence:
+      description: Evidence chain
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: array
+                items: { $ref: '#/components/schemas/EvidenceEntry' }
+    VerifyResult:
+      description: Verification result
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data: { $ref: '#/components/schemas/VerifyResult' }
+    Decision:
+      description: Decision recorded
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [alert_id, decision, status]
+                properties:
+                  alert_id: { type: string }
+                  decision: { enum: [APPROVE, REJECT] }
+                  status: { enum: [OPEN, CONTAINED, AWAITING_APPROVAL, LOCKED, RELEASED, CLOSED] }
+    Release:
+      description: Containment released
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [alert_id, status, released]
+                properties:
+                  alert_id: { type: string }
+                  status: { enum: [OPEN, CONTAINED, AWAITING_APPROVAL, LOCKED, RELEASED, CLOSED] }
+                  released:
+                    type: array
+                    items:
+                      type: object
+                      required: [action, mode, result]
+                      properties:
+                        action: { type: string }
+                        mode: { enum: [LIVE, DRY_RUN] }
+                        result: { type: string }
+    Reports:
+      description: Report drafts
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: array
+                items: { $ref: '#/components/schemas/Report' }
+    Ask:
+      description: Ask FinShield answer
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [answer, sources]
+                properties:
+                  answer: { type: string }
+                  sources: { type: array, items: { type: string } }
+    User:
+      description: User profile
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [user_id, name_pseudo, team, role, is_admin, is_service, baseline, recent_risk]
+                properties:
+                  user_id: { type: string }
+                  name_pseudo: { type: string }
+                  team: { type: string }
+                  role: { type: string }
+                  is_admin: { type: boolean }
+                  is_service: { type: boolean }
+                  office_start: { type: string }
+                  office_end: { type: string }
+                  home_city: { type: string }
+                  devices: { type: array, items: { type: string } }
+                  partner_id: { type: [string, 'null'] }
+                  iam_principal_arn: { type: [string, 'null'] }
+                  baseline:
+                    type: object
+                    required: [p95_15min, avg_daily, usual_hours, cities, devices, p95_disburse_inr]
+                    properties:
+                      p95_15min: { type: number }
+                      avg_daily: { type: number }
+                      usual_hours: { type: string }
+                      cities: { type: array, items: { type: string } }
+                      devices: { type: array, items: { type: string } }
+                      p95_disburse_inr: { type: [number, 'null'] }
+                  recent_risk:
+                    type: array
+                    items:
+                      type: object
+                      required: [alert_id, score, severity, detected_at]
+                      properties:
+                        alert_id: { type: string }
+                        score: { type: integer }
+                        severity: { enum: [CRITICAL, HIGH, MEDIUM] }
+                        detected_at: { type: string }
+    Rules:
+      description: contract/config.json contents
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data: { type: object, required: [version, signals, exceptions, severity_thresholds, deadlines, incident_window_minutes] }
+    Compliance:
+      description: Control map
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: array
+                items:
+                  type: object
+                  required: [control_id, obligation, finshield_control, evidence, screen, status]
+                  properties:
+                    control_id: { type: string }
+                    obligation: { type: string }
+                    finshield_control: { type: string }
+                    evidence: { type: string }
+                    screen: { type: string }
+                    status: { enum: [IN_PLACE, GAP, NOT_APPLICABLE, UNKNOWN] }
+                    verify_clause: { type: boolean }
+    Privacy:
+      description: Privacy risks
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [consent_risks, unmasked_aadhaar_files, purpose_mismatches]
+                properties:
+                  consent_risks:
+                    type: array
+                    items:
+                      type: object
+                      required: [customer_id, issue]
+                      properties:
+                        customer_id: { type: string }
+                        issue: { type: string }
+                  unmasked_aadhaar_files:
+                    type: array
+                    items:
+                      type: object
+                      required: [file_id, customer_id, doc_type]
+                      properties:
+                        file_id: { type: string }
+                        customer_id: { type: string }
+                        doc_type: { type: string }
+                  purpose_mismatches:
+                    type: array
+                    items:
+                      type: object
+                      required: [alert_id, user_id, purpose, customers]
+                      properties:
+                        alert_id: { type: string }
+                        user_id: { type: string }
+                        purpose: { type: string }
+                        customers: { type: integer }
+    ApprovalList:
+      description: Approvals
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: array
+                items: { $ref: '#/components/schemas/Approval' }
+    Approval:
+      description: Approval created
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data: { $ref: '#/components/schemas/Approval' }
+    Simulate:
+      description: Simulation started
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [accepted, scenario_id, events_sent]
+                properties:
+                  accepted: { type: boolean }
+                  scenario_id: { type: [string, 'null'] }
+                  events_sent: { type: integer }
+    Accuracy:
+      description: Accuracy results
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error]
+            properties:
+              error: { type: 'null' }
+              data:
+                type: object
+                required: [run_id, ran_at, passed, total, false_alerts_normal_days, rows]
+                properties:
+                  run_id: { type: string }
+                  ran_at: { type: string }
+                  passed: { type: integer }
+                  total: { type: integer }
+                  false_alerts_normal_days: { type: integer }
+                  rows:
+                    type: array
+                    items: { $ref: '#/components/schemas/AccuracyRow' }

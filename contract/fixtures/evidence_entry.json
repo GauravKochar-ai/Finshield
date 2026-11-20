@@ -1,0 +1,18 @@
+{
+  "alert_id": "ALR-20261120-0007",
+  "seq": 1,
+  "ts": "2026-11-20T23:49:03+05:30",
+  "type": "ALERT_RAISED",
+  "actor": "detection",
+  "payload": {
+    "alert_id": "ALR-20261120-0007",
+    "severity": "CRITICAL",
+    "previous_severity": null,
+    "score": 96,
+    "user_id": "u-017",
+    "principal_arn": "arn:aws:iam::000000000000:role/finshield-dev-demo-ops-admin",
+    "detected_at": "2026-11-20T23:49:02+05:30"
+  },
+  "prev_hash": "GENESIS:ALR-20261120-0007",
+  "hash": "4f286f1b84d19ff178bf2d9cd22f407ba858c750f10abbc19d119a96097136b6"
+}

@@ -1,0 +1,158 @@
+{
+  "data": {
+    "version": "1.0.0",
+    "timezone_offset": "+05:30",
+    "score_cap": 100,
+    "incident_window_minutes": 60,
+    "severity_thresholds": {
+      "CRITICAL": 80,
+      "HIGH": 60,
+      "MEDIUM": 40
+    },
+    "deadlines": [
+      {
+        "body": "RBI",
+        "hours": 6,
+        "label": "RBI incident report (readiness timer)"
+      },
+      {
+        "body": "CERT-In",
+        "hours": 6,
+        "label": "CERT-In incident report (readiness timer)"
+      },
+      {
+        "body": "DPB",
+        "hours": 72,
+        "label": "Data Protection Board detailed report (readiness timer)"
+      }
+    ],
+    "signals": {
+      "S1": {
+        "name": "Volume spike",
+        "description": "15-min downloads divided by max(user p95, team p95, baseline_floor). PRESIGN over presign_count_threshold counts as downloads.",
+        "baseline_floor": 1,
+        "presign_count_threshold": 50,
+        "ratio_tiers": [
+          {
+            "min_ratio": 100,
+            "points": 40
+          },
+          {
+            "min_ratio": 20,
+            "points": 30
+          },
+          {
+            "min_ratio": 5,
+            "points": 20
+          },
+          {
+            "min_ratio": 3,
+            "points": 10
+          }
+        ],
+        "max_points": 40
+      },
+      "S2": {
+        "name": "Slow leak",
+        "description": "Daily downloads exceed multiple of daily average and minimum count; only applies if higher than S1.",
+        "points": 25,
+        "daily_multiple": 5,
+        "min_daily_count": 200
+      },
+      "S3": {
+        "name": "Privileged role without approval",
+        "description": "Emergency role assumed with no covering approval, or service account outside its job window.",
+        "points": 20,
+        "emergency_roles": [
+          "KYC-Emergency"
+        ]
+      },
+      "S4": {
+        "name": "External upload to non-allowlisted destination",
+        "description": "UPLOAD_EXTERNAL: large or close to KYC downloads scores high, otherwise low.",
+        "points_high": 15,
+        "points_low": 8,
+        "bytes_threshold": 104857600,
+        "proximity_minutes": 60,
+        "allowlist": [
+          "registry.finshield.example",
+          "s3.ap-south-1.amazonaws.com"
+        ]
+      },
+      "S5": {
+        "name": "Risky login",
+        "description": "New device, MFA fatigue, or impossible travel. Points are summed and capped at max_points.",
+        "new_device_points": 5,
+        "mfa_push_points": 6,
+        "mfa_push_count": 5,
+        "mfa_push_window_minutes": 2,
+        "impossible_travel_points": 11,
+        "impossible_travel_km": 500,
+        "impossible_travel_window_minutes": 60,
+        "max_points": 11
+      },
+      "S6": {
+        "name": "Off-hours activity",
+        "description": "Activity outside the user's usual hours by more than grace_hours.",
+        "points": 10,
+        "grace_hours": 1
+      },
+      "S7": {
+        "name": "Unassigned customer access",
+        "description": "Customers not assigned to the user or their partner, within the window.",
+        "points": 40,
+        "min_customers": 20,
+        "window_minutes": 60
+      },
+      "S8": {
+        "name": "Logging tampered",
+        "description": "StopLogging, DeleteTrail or bucket logging disabled. Instant maximum score.",
+        "points": 100,
+        "instant": true
+      },
+      "S9": {
+        "name": "Purpose mismatch",
+        "description": "KYC or PII read for a purpose the customer has not consented to.",
+        "points": 30,
+        "min_customers": 10,
+        "window_minutes": 60
+      },
+      "S10": {
+        "name": "Abnormal disbursement",
+        "description": "DISBURSE to a recently changed bank account and/or amount far above user's p95.",
+        "new_account_points": 30,
+        "new_account_hours": 24,
+        "amount_points": 20,
+        "amount_multiple_of_p95": 3,
+        "max_points": 50
+      },
+      "S11": {
+        "name": "Sensitive resource misconfigured",
+        "description": "Config non-compliant resource; KYC data class scores higher.",
+        "kyc_points": 45,
+        "other_points": 20,
+        "max_points": 45
+      }
+    },
+    "exceptions": {
+      "E1": {
+        "name": "Scheduled job",
+        "description": "Scheduled job inside its window caps the score.",
+        "cap": 30
+      },
+      "E2": {
+        "name": "Approved ticket",
+        "description": "Approved ticket caps the score; void if files exceed the ticket by more than overage_tolerance_pct (then add overage_points).",
+        "cap": 30,
+        "overage_tolerance_pct": 20,
+        "overage_points": 10
+      },
+      "E3": {
+        "name": "Self-approval ignored",
+        "description": "An approval created by the actor being scored is ignored.",
+        "ignore_self_approval": true
+      }
+    }
+  },
+  "error": null
+}

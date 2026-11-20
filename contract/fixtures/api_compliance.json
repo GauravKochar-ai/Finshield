@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "control_id": "CTL-01",
+      "obligation": "Reasonable security safeguards (DPDP-aligned readiness and controls)",
+      "finshield_control": "Detection, containment and sealed evidence",
+      "evidence": "Evidence chain",
+      "screen": "Alert detail",
+      "status": "IN_PLACE",
+      "verify_clause": true
+    },
+    {
+      "control_id": "CTL-02",
+      "obligation": "Incident reporting readiness timers (RBI 6h, CERT-In 6h, DPB 72h)",
+      "finshield_control": "Deadline countdowns from detected_at",
+      "evidence": "Alert deadlines",
+      "screen": "Overview",
+      "status": "IN_PLACE",
+      "verify_clause": true
+    }
+  ],
+  "error": null
+}

@@ -1,0 +1,10 @@
+{
+  "data": {
+    "answer": "SAMPLE. 212 KYC files were downloaded in 15 minutes by u-017 (106x baseline). Score 96, CRITICAL.",
+    "sources": [
+      "alert:ALR-20261120-0007",
+      "signal:S1"
+    ]
+  },
+  "error": null
+}

@@ -1,0 +1,58 @@
+{
+  "data": {
+    "posture_score": 72,
+    "alerts_by_severity": {
+      "CRITICAL": 1,
+      "HIGH": 0,
+      "MEDIUM": 0
+    },
+    "config_results": [
+      {
+        "control_id": "s3-bucket-public-read-prohibited",
+        "source": "config",
+        "status": "COMPLIANT",
+        "resource_arn": "arn:aws:s3:::finshield-dev-kyc-docs",
+        "last_evaluated": "2026-11-20T23:00:00+05:30"
+      },
+      {
+        "control_id": "cloudtrail-enabled",
+        "source": "config",
+        "status": "COMPLIANT",
+        "resource_arn": null,
+        "last_evaluated": "2026-11-20T23:00:00+05:30"
+      },
+      {
+        "control_id": "mfa-enabled-for-iam-console-access",
+        "source": "config",
+        "status": "NON_COMPLIANT",
+        "resource_arn": "arn:aws:iam::000000000000:user/finshield-dev-demo-kyc-user",
+        "last_evaluated": "2026-11-20T23:00:00+05:30"
+      }
+    ],
+    "consent_risks": {
+      "purpose_mismatches": 0,
+      "withdrawn_consents_accessed": 0
+    },
+    "deadlines_due_soon": [
+      {
+        "alert_id": "ALR-20261120-0007",
+        "body": "RBI",
+        "due_at": "2026-11-21T05:49:02+05:30",
+        "seconds_remaining": 21600
+      },
+      {
+        "alert_id": "ALR-20261120-0007",
+        "body": "CERT-In",
+        "due_at": "2026-11-21T05:49:02+05:30",
+        "seconds_remaining": 21600
+      },
+      {
+        "alert_id": "ALR-20261120-0007",
+        "body": "DPB",
+        "due_at": "2026-11-23T23:49:02+05:30",
+        "seconds_remaining": 259200
+      }
+    ]
+  },
+  "error": null
+}
