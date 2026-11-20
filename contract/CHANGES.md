@@ -80,3 +80,15 @@
   prompt forbids arithmetic (a live answer summed numbers into 215, which the number check rejected).
 - kyc_label vision now goes through `finshield.bedrock.converse(image=...)`, so the Guardrail and temperature 0 apply.
 - Bedrock statements are scoped to `arn:aws:bedrock:<region>::foundation-model/*` plus the stack guardrail ARN.
+
+## OPEN-13 (AI suggestions and Slack): new table, two Lambdas, no contract file edited
+- New DynamoDB table `AiSuggestions` (key `alert_id` + `task`) holds advisory output: tasks SECOND_OPINION, CONTAINMENT_ADVICE,
+  COMPLIANCE_MAP (per alert) and DIGEST (`alert_id = "DIGEST"`), plus `SLACK#<severity>` markers for Slack idempotency.
+  Item shape: `{alert_id, task, status OK|FALLBACK, output, model_id, generated_at, review_status PROPOSED|INFO, reason}`.
+  It is validated in code (`ai_suggest/app.py`) only. No JSON Schema or REST route exists yet: a schema and
+  `GET /v1/alerts/{id}/ai-suggestions` are needed before the frontend can show it. Decision needed (integration lead).
+- `ai_suggest` runs on `Alert Raised` (SECOND_OPINION, COMPLIANCE_MAP) and on `Incident Updated` with status AWAITING_APPROVAL
+  (CONTAINMENT_ADVICE, so already-done actions are excluded). It never writes to Alerts or Evidence and never runs containment.
+- `ai_suggest/regulations.json` is a copy of `ai_explain/regulations.json` (NOT VERIFIED list). Keep both in step when Arvind replaces it.
+- `slack_notify` runs on `Alert Raised`. Webhook: SSM SecureString `/finshield/dev/slack_webhook_url` (not created by the template;
+  unset means Slack is off). Optional `/finshield/dev/portal_url` adds an "Open case" button. Test count in test_template.py 13 -> 14 tables.

@@ -47,9 +47,9 @@ def test_parameters_present():
     assert {"Stage", "AlertEmail", "ContainmentMode", "CreateGuardDutyDetector", "EnableConfigRules", "EnableDnsFirewall"} <= set(T["Parameters"])
 
 
-def test_thirteen_tables_and_five_main_buckets():
+def test_fourteen_tables_and_five_main_buckets():
     tables = [k for k, v in RES.items() if v["Type"] == "AWS::DynamoDB::Table"]
-    assert len(tables) == 13
+    assert len(tables) == 14
     for k in tables:
         p = RES[k]["Properties"]
         assert p["BillingMode"] == "PAY_PER_REQUEST"

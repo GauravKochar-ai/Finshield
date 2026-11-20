@@ -90,6 +90,7 @@ Globals:
         TABLE_REPORTS: !Ref ReportsTable
         TABLE_POSTURE: !Ref PostureTable
         TABLE_ACCURACYRUNS: !Ref AccuracyRunsTable
+        TABLE_AISUGGESTIONS: !Ref AiSuggestionsTable
 
 Resources:
   # ===================== Key, layer, bus, topic =====================
@@ -492,6 +493,25 @@ Resources:
         - { AttributeName: alert_id, KeyType: HASH }
         - { AttributeName: report_type, KeyType: RANGE }
 
+  AiSuggestionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub finshield-${Stage}-AiSuggestions
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DataKey.Arn
+      AttributeDefinitions:
+        - { AttributeName: alert_id, AttributeType: S }
+        - { AttributeName: task, AttributeType: S }
+      KeySchema:
+        - { AttributeName: alert_id, KeyType: HASH }
+        - { AttributeName: task, KeyType: RANGE }
   PostureTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
@@ -980,6 +1000,63 @@ Resources:
             Method: POST
             Path: /v1/alerts/{id}/ask
 
+  AiSuggestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-ai-suggest
+      Description: "Advisory Bedrock tasks: second opinion, containment advice, compliance map, digest. Never changes score or containment."
+      CodeUri: ../backend/functions/ai_suggest/
+      Timeout: 60
+      Policies:
+        - Statement:
+            - Sid: BedrockConverse
+              Effect: Allow
+              Action: [bedrock:InvokeModel, bedrock:Converse, bedrock:ApplyGuardrail]
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${Guardrail.GuardrailId}'
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiSuggestionsTable
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        AlertRaisedRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref Bus
+            Pattern: {"detail-type": ["Alert Raised"]}
+        AwaitingApprovalRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref Bus
+            Pattern: {"detail-type": ["Incident Updated"], "detail": {"status": ["AWAITING_APPROVAL"]}}
+  SlackNotifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub finshield-${Stage}-slack-notify
+      Description: "Formatted Slack messages: detection on Alert Raised, AI analysis on AWAITING_APPROVAL. Off until SSM slack_webhook_url is set."
+      CodeUri: ../backend/functions/slack_notify/
+      Timeout: 30
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlertsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiSuggestionsTable
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'finshield/${Stage}/*'
+      Events:
+        AlertRaisedRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref Bus
+            Pattern: {"detail-type": ["Alert Raised"]}
+        AwaitingApprovalRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref Bus
+            Pattern: {"detail-type": ["Incident Updated"], "detail": {"status": ["AWAITING_APPROVAL"]}}
   KycLabelFunction:
     Type: AWS::Serverless::Function
     Properties:
