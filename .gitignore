@@ -12,3 +12,6 @@ node_modules/
 web/out/
 web/.env.local
 .pytest_cache/
+
+# KYC manifest lives in DynamoDB KycFiles (import with generate.py --manifest)
+simulator/seed/kyc-docs/

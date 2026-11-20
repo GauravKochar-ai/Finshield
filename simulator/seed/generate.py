@@ -133,7 +133,7 @@ def consent_purposes(n: int):
     return purposes, withdrawn
 
 
-def make_customers(now):
+def make_customers(now, manifest=()):
     rnd = random.Random(SEED + 1)
     out = []
     for n in range(CUSTOMER_FIRST, CUSTOMER_LAST + 1):
@@ -145,7 +145,7 @@ def make_customers(now):
             "bank_account_changed_at": iso(now - timedelta(days=60 + (n * 37) % 600)), "sample": True,
         })
     by_id = {c["customer_id"]: c for c in out}
-    for r in read_manifest():  # the real sample files carry their own last-4 and fake PAN
+    for r in manifest:  # the real sample files carry their own last-4 and fake PAN
         c = by_id.get(r["customer_id"])
         if c:
             if r.get("aadhaar_last4"):
@@ -155,18 +155,39 @@ def make_customers(now):
     return out
 
 
-MANIFEST = Path(__file__).resolve().parent / "kyc-docs" / "manifest.csv"
+MANIFEST_FIELDS = ("file_id", "customer_id", "doc_type", "s3_key", "size_kb", "aadhaar_last4", "pan_fake", "unmasked_aadhaar")
 
 
-def read_manifest():
-    """Roopak's manifest of the 200 real SAMPLE files in the KYC bucket. synthetic_name is never stored (pseudonyms only)."""
-    if not MANIFEST.is_file():
-        return []
-    with open(MANIFEST, newline="", encoding="utf-8") as f:
-        return [r for r in csv.DictReader(f) if r.get("file_id")]
+def manifest_from_csv(src):
+    """One-time import of Roopak's manifest (local path or s3://bucket/key). synthetic_name is dropped."""
+    if src.startswith("s3://"):
+        import boto3
+        bucket, key = src[5:].split("/", 1)
+        text = boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8")
+    else:
+        text = Path(src).read_text(encoding="utf-8")
+    return [{k: r.get(k, "") for k in MANIFEST_FIELDS} for r in csv.DictReader(text.splitlines()) if r.get("file_id")]
 
 
-def make_kyc_files(customers):
+def manifest_from_dynamodb():
+    """The manifest lives in DynamoDB: KycFiles rows with in_bucket = true (the real files in the KYC bucket)."""
+    from boto3.dynamodb.conditions import Attr
+    from finshield import ddb
+    out, kw = [], {"FilterExpression": Attr("in_bucket").eq(True)}
+    tbl = ddb.table("KycFiles")
+    while True:
+        r = tbl.scan(**kw)
+        for i in r.get("Items", []):
+            i = ddb.from_ddb(i)
+            out.append({"file_id": i["file_id"], "customer_id": i["customer_id"], "doc_type": i["doc_type"],
+                        "s3_key": i["s3_key"], "size_kb": i.get("size_kb", 0), "aadhaar_last4": i.get("aadhaar_last4", ""),
+                        "pan_fake": i.get("pan_fake", ""), "unmasked_aadhaar": str(bool(i.get("unmasked_aadhaar_flag"))).lower()})
+        if "LastEvaluatedKey" not in r:
+            return out
+        kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
+
+
+def make_kyc_files(customers, manifest=()):
     """Metadata for 4 documents per customer (same key pattern), then the manifest rows replace their file_ids."""
     rnd = random.Random(SEED + 2)
     rows = {f"KYC-{d}-{c['customer_id']}": {
@@ -174,10 +195,11 @@ def make_kyc_files(customers):
         "s3_key": f"kyc/{c['customer_id']}/KYC-{d}-{c['customer_id']}.png", "size_kb": rnd.randint(80, 900),
         "ai_label": None, "unmasked_aadhaar_flag": False, "in_bucket": False, "sample": True}
         for c in customers for d in DOC_TYPES}
-    for r in read_manifest():
+    for r in manifest:
         rows[r["file_id"]] = {"file_id": r["file_id"], "customer_id": r["customer_id"], "doc_type": r["doc_type"],
                               "s3_key": r["s3_key"], "size_kb": float(r["size_kb"] or 0), "ai_label": None,
-                              "unmasked_aadhaar_flag": r.get("unmasked_aadhaar", "").strip().lower() == "true",
+                              "unmasked_aadhaar_flag": str(r.get("unmasked_aadhaar", "")).strip().lower() == "true",
+                              "aadhaar_last4": r.get("aadhaar_last4") or None, "pan_fake": r.get("pan_fake") or None,
                               "in_bucket": True, "sample": True}
     return list(rows.values())
 
@@ -403,14 +425,14 @@ def scenario_files_dir() -> Path:
 
 
 # ------------------------------------------------------------------ outputs
-def build(now, account=ACCOUNT_PLACEHOLDER, stage="dev"):
+def build(now, account=ACCOUNT_PLACEHOLDER, stage="dev", manifest=()):
     from finshield import baselines as bl
     from finshield.config import load_config
     users = make_users(account, stage)
-    customers = make_customers(now)
+    customers = make_customers(now, manifest)
     events = history(users, now)
     base = bl.compute(load_config(), users, events, iso(now))
-    return {"Users": users, "Customers": customers, "KycFiles": make_kyc_files(customers), "Consent": make_consent(now),
+    return {"Users": users, "Customers": customers, "KycFiles": make_kyc_files(customers, manifest), "Consent": make_consent(now),
             "Approvals": make_approvals(now), "Events": events, "Baselines": list(base.values())}
 
 
@@ -442,6 +464,8 @@ def main(argv=None):
     ap.add_argument("--now", help="ISO time used as 'now' (default: current time)")
     ap.add_argument("--account", help="AWS account id for ARNs (default: STS when --load, else placeholder)")
     ap.add_argument("--stage", default=os.environ.get("STAGE", "dev"))
+    ap.add_argument("--manifest", help="import a KYC manifest CSV (path or s3://bucket/key) into DynamoDB; without it, "
+                                       "--load keeps the manifest rows already in KycFiles")
     a = ap.parse_args(argv)
     if not (a.out or a.load or a.scenarios):
         ap.error("give --out, --load and/or --scenarios")
@@ -458,7 +482,11 @@ def main(argv=None):
             (d / f"{s['scenario_id']}.json").write_text(json.dumps(s, indent=1) + "\n", encoding="utf-8")
         print(f"scenarios: 11 files -> {d}")
     if a.out or a.load:
-        data = build(now, account, a.stage)
+        for logical in ("Users", "Customers", "KycFiles", "Consent", "Approvals", "Events", "Baselines"):
+            os.environ.setdefault(f"TABLE_{logical.upper()}", f"finshield-{a.stage}-{logical}")
+        manifest = manifest_from_csv(a.manifest) if a.manifest else (manifest_from_dynamodb() if a.load else [])
+        print(f"manifest: {len(manifest)} rows from {a.manifest or ('DynamoDB KycFiles' if a.load else 'none')}")
+        data = build(now, account, a.stage, manifest)
         if a.out:
             d = Path(a.out)
             d.mkdir(parents=True, exist_ok=True)

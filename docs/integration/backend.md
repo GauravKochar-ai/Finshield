@@ -257,10 +257,13 @@ make accuracy               # 11 of 11, 0 false alerts
 make logs FN=detection      # tail logs
 ```
 Seed JSON for tests or mocks: `python3 simulator/seed/generate.py --out build/seed`.
-KYC files: `simulator/seed/kyc-docs/manifest.csv` (Roopak, 200 real SAMPLE images in `s3://finshield-dev-kyc-docs/kyc/`):
-80 PAN, 90 AADHAAR (C-10161..C-10170 have `unmasked_aadhaar_flag = true`, shown on `GET /privacy`), 30 SELFIE.
-Those rows have `in_bucket = true`; the other customers' KycFiles rows are metadata only. Customers C-10001..C-10200
-take `aadhaar_last4` and `pan_fake` from the manifest. `synthetic_name` is never stored (pseudonyms only).
+KYC files: the manifest lives in DynamoDB, table `finshield-dev-KycFiles` (rows with `in_bucket = true`), for the 200 real
+SAMPLE images in `s3://finshield-dev-kyc-docs/kyc/`: 80 PAN, 90 AADHAAR (C-10161..C-10170 have `unmasked_aadhaar_flag = true`,
+shown on `GET /privacy`), 30 SELFIE. Each row: `file_id, customer_id, doc_type, s3_key, size_kb, aadhaar_last4, pan_fake,
+unmasked_aadhaar_flag, in_bucket`. The other customers' rows are metadata only (`in_bucket = false`).
+`generate.py --load` keeps the manifest rows already in KycFiles. To import a new manifest once:
+`python3 simulator/seed/generate.py --load --manifest s3://<bucket>/manifest.csv` (or a local path). `synthetic_name` is
+dropped on import and never stored (pseudonyms only); the CSV is not kept in git.
 Tests: `make test` (fast); `RUN_SLOW=1 make test` replays every scenario through mocked AWS.
 
 ## 9. Known limits
