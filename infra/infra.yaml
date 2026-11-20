@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  FinShield AI - INFRASTRUCTURE ONLY (stack: fs-infra). Storage, tables,
+  alerting, log groups with 180-day retention and CloudWatch alarms.
+  The backend (Lambdas, API, Step Functions, EventBridge rule) is deployed
+  separately from template.yaml (stack: fs-stack) and uses these resources.
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Email address that receives SOC / CISO / DPO alerts
+  LogRetentionDays:
+    Type: Number
+    Default: 180
+    Description: CloudWatch log retention (CERT-In requires 180 days of logs)
+
+Resources:
+  # ------------------------------------------------------------- S3 buckets
+  RawLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "fs-raw-logs-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - { Key: project, Value: finshield-ai }
+        - { Key: data-class, Value: raw-security-logs }
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "fs-evidence-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - { Key: project, Value: finshield-ai }
+        - { Key: data-class, Value: evidence-and-reports }
+
+  # -------------------------------------------------------- DynamoDB tables
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: fs-events
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: actor_id, AttributeType: S }
+        - { AttributeName: ts, AttributeType: S }
+      KeySchema:
+        - { AttributeName: actor_id, KeyType: HASH }
+        - { AttributeName: ts, KeyType: RANGE }
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - { Key: project, Value: finshield-ai }
+
+  CasesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: fs-cases
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: case_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: case_id, KeyType: HASH }
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - { Key: project, Value: finshield-ai }
+
+  # ----------------------------------------------------------- SNS alerts
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: fs-alerts
+      DisplayName: FinShield AI Alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+      Tags:
+        - { Key: project, Value: finshield-ai }
+
+  # ------------------------------- Log groups (created before the Lambdas)
+  IngestLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/fs-ingest, RetentionInDays: !Ref LogRetentionDays }
+  AnalyzeLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/fs-analyze, RetentionInDays: !Ref LogRetentionDays }
+  EvidenceLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/fs-evidence, RetentionInDays: !Ref LogRetentionDays }
+  ContainLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/fs-contain, RetentionInDays: !Ref LogRetentionDays }
+  StoreTokenLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/fs-store-token, RetentionInDays: !Ref LogRetentionDays }
+  RespondLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/fs-respond, RetentionInDays: !Ref LogRetentionDays }
+  ReportLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/fs-report, RetentionInDays: !Ref LogRetentionDays }
+
+  # --------------------------------- CloudWatch alarms -> SNS (monitoring)
+  IngestErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: fs-ingest-errors
+      AlarmDescription: fs-ingest is failing - events may not be processed
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [ { Name: FunctionName, Value: fs-ingest } ]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [ !Ref AlertsTopic ]
+
+  AnalyzeErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: fs-analyze-errors
+      AlarmDescription: fs-analyze is failing - cases may not be analyzed
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [ { Name: FunctionName, Value: fs-analyze } ]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [ !Ref AlertsTopic ]
+
+  WorkflowFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: fs-response-workflow-failed
+      AlarmDescription: The incident response workflow failed
+      Namespace: AWS/States
+      MetricName: ExecutionsFailed
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:fs-response-workflow"
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [ !Ref AlertsTopic ]
+
+Outputs:
+  RawBucketName:
+    Value: !Ref RawLogsBucket
+    Export: { Name: fs-infra-RawBucketName }
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+    Export: { Name: fs-infra-EvidenceBucketName }
+  EventsTableName:
+    Value: !Ref EventsTable
+    Export: { Name: fs-infra-EventsTableName }
+  CasesTableName:
+    Value: !Ref CasesTable
+    Export: { Name: fs-infra-CasesTableName }
+  AlertsTopicArn:
+    Value: !Ref AlertsTopic
+    Export: { Name: fs-infra-AlertsTopicArn }

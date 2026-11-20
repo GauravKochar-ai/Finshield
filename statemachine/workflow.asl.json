@@ -1,0 +1,201 @@
+{
+  "Comment": "FinShield AI response workflow: analyze -> evidence -> contain + notify -> CISO approval -> disable -> reports",
+  "StartAt": "Analyze",
+  "States": {
+    "Analyze": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AnalyzeFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "BuildEvidence"
+    },
+    "BuildEvidence": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${EvidenceFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "Severity?"
+    },
+    "Severity?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.severity",
+          "StringEquals": "CRITICAL",
+          "Next": "ContainAndNotify"
+        },
+        {
+          "Variable": "$.severity",
+          "StringEquals": "HIGH",
+          "Next": "NotifyHigh"
+        }
+      ],
+      "Default": "LogOnly"
+    },
+    "ContainAndNotify": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "AutoContain",
+          "States": {
+            "AutoContain": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${ContainFunctionArn}",
+                "Payload.$": "$"
+              },
+              "OutputPath": "$.Payload",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "NotifyCritical",
+          "States": {
+            "NotifyCritical": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "${AlertsTopicArn}",
+                "Subject": "CRITICAL: KYC data exfiltration detected - FinShield AI",
+                "Message.$": "$.alert_message"
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.containment_result",
+      "Next": "WaitForApproval"
+    },
+    "NotifyHigh": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${AlertsTopicArn}",
+        "Subject": "HIGH risk case - FinShield AI",
+        "Message.$": "$.alert_message"
+      },
+      "ResultPath": null,
+      "Next": "WaitForApproval"
+    },
+    "WaitForApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${StoreTokenFunctionArn}",
+        "Payload": {
+          "case_id.$": "$.case_id",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "ResultPath": "$.approval",
+      "TimeoutSeconds": 3600,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.Timeout"],
+          "ResultPath": "$.error",
+          "Next": "EscalateTimeout"
+        }
+      ],
+      "Next": "Approved?"
+    },
+    "Approved?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.approval.decision",
+          "StringEquals": "APPROVED",
+          "Next": "DisableAccount"
+        }
+      ],
+      "Default": "MarkFalsePositive"
+    },
+    "DisableAccount": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${RespondFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Next": "DraftReports"
+    },
+    "DraftReports": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ReportFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "End": true
+    },
+    "MarkFalsePositive": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${CasesTableName}",
+        "Key": {
+          "case_id": {
+            "S.$": "$.case_id"
+          }
+        },
+        "UpdateExpression": "SET #s = :s REMOVE approval_token",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":s": {
+            "S": "FALSE_POSITIVE"
+          }
+        }
+      },
+      "End": true
+    },
+    "EscalateTimeout": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${AlertsTopicArn}",
+        "Subject": "ESCALATION: CISO approval timed out - FinShield AI",
+        "Message.$": "$.case_id"
+      },
+      "End": true
+    },
+    "LogOnly": {
+      "Type": "Succeed"
+    }
+  }
+}

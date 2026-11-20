@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  FinShield AI - BACKEND (stack: fs-stack). Lambdas, HTTP API, Step Functions
+  response workflow and EventBridge rule. Uses the buckets, tables, SNS topic,
+  log groups and alarms created by infra/infra.yaml (stack: fs-infra) -
+  deploy fs-infra FIRST.
+
+Parameters:
+  ModelId:
+    Type: String
+    Default: "NONE"
+    Description: Bedrock model or inference profile ID (copy it from the Bedrock console). NONE = rule-based fallback text.
+  GuardrailId:
+    Type: String
+    Default: "NONE"
+    Description: Bedrock Guardrail ID for Aadhaar / PAN masking. NONE = local regex masking only.
+  GuardrailVersion:
+    Type: String
+    Default: "1"
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+
+Resources:
+  # ------------------------------------------------------------------ Lambdas
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fs-ingest
+      Description: Receives events, stores raw copy, correlates actor activity, starts workflow once per case
+      CodeUri: src/ingest/
+      Handler: app.lambda_handler
+      Timeout: 15
+      Environment:
+        Variables:
+          RAW_BUCKET: !ImportValue fs-infra-RawBucketName
+          EVENTS_TABLE: !ImportValue fs-infra-EventsTableName
+          CASES_TABLE: !ImportValue fs-infra-CasesTableName
+      Policies:
+        - S3WritePolicy:
+            BucketName: !ImportValue fs-infra-RawBucketName
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-EventsTableName
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+        - EventBridgePutEventsPolicy:
+            EventBusName: default
+      Events:
+        IngestApi:
+          Type: HttpApi
+          Properties:
+            Path: /events
+            Method: post
+
+  AnalyzeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fs-analyze
+      Description: Masks Aadhaar/PAN, asks Bedrock for verdict, MITRE and regulation mapping
+      CodeUri: src/analyze/
+      Handler: app.lambda_handler
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          EVENTS_TABLE: !ImportValue fs-infra-EventsTableName
+          CASES_TABLE: !ImportValue fs-infra-CasesTableName
+          MODEL_ID: !Ref ModelId
+          GUARDRAIL_ID: !Ref GuardrailId
+          GUARDRAIL_VERSION: !Ref GuardrailVersion
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !ImportValue fs-infra-EventsTableName
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:ApplyGuardrail
+              Resource: "*"
+
+  EvidenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fs-evidence
+      Description: Builds a SHA-256 hash-chained evidence pack in S3
+      CodeUri: src/evidence/
+      Handler: app.lambda_handler
+      Timeout: 30
+      Environment:
+        Variables:
+          RAW_BUCKET: !ImportValue fs-infra-RawBucketName
+          EVIDENCE_BUCKET: !ImportValue fs-infra-EvidenceBucketName
+          EVENTS_TABLE: !ImportValue fs-infra-EventsTableName
+          CASES_TABLE: !ImportValue fs-infra-CasesTableName
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !ImportValue fs-infra-RawBucketName
+        - S3CrudPolicy:
+            BucketName: !ImportValue fs-infra-EvidenceBucketName
+        - DynamoDBReadPolicy:
+            TableName: !ImportValue fs-infra-EventsTableName
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+
+  ContainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fs-contain
+      Description: MOCK containment - revoke session and block destination
+      CodeUri: src/workflow/
+      Handler: contain.lambda_handler
+      Environment:
+        Variables:
+          CASES_TABLE: !ImportValue fs-infra-CasesTableName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+
+  StoreTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fs-store-token
+      Description: Saves the Step Functions task token so the dashboard can approve
+      CodeUri: src/workflow/
+      Handler: store_token.lambda_handler
+      Environment:
+        Variables:
+          CASES_TABLE: !ImportValue fs-infra-CasesTableName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+
+  RespondFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fs-respond
+      Description: MOCK account disable after CISO approval
+      CodeUri: src/workflow/
+      Handler: respond.lambda_handler
+      Environment:
+        Variables:
+          CASES_TABLE: !ImportValue fs-infra-CasesTableName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+
+  ReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fs-report
+      Description: Drafts RBI incident report, CERT-In report and DPDP breach notice
+      CodeUri: src/report/
+      Handler: app.lambda_handler
+      Timeout: 120
+      MemorySize: 512
+      Environment:
+        Variables:
+          CASES_TABLE: !ImportValue fs-infra-CasesTableName
+          EVIDENCE_BUCKET: !ImportValue fs-infra-EvidenceBucketName
+          MODEL_ID: !Ref ModelId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+        - S3CrudPolicy:
+            BucketName: !ImportValue fs-infra-EvidenceBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: "*"
+
+  # ------------------------------------------------- Workflow + EventBridge rule
+  ResponseWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: fs-response-workflow
+      Type: STANDARD
+      DefinitionUri: statemachine/workflow.asl.json
+      DefinitionSubstitutions:
+        AnalyzeFunctionArn: !GetAtt AnalyzeFunction.Arn
+        EvidenceFunctionArn: !GetAtt EvidenceFunction.Arn
+        ContainFunctionArn: !GetAtt ContainFunction.Arn
+        StoreTokenFunctionArn: !GetAtt StoreTokenFunction.Arn
+        RespondFunctionArn: !GetAtt RespondFunction.Arn
+        ReportFunctionArn: !GetAtt ReportFunction.Arn
+        AlertsTopicArn: !ImportValue fs-infra-AlertsTopicArn
+        CasesTableName: !ImportValue fs-infra-CasesTableName
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AnalyzeFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EvidenceFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ContainFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref StoreTokenFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RespondFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ReportFunction
+        - Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !ImportValue fs-infra-AlertsTopicArn
+        - DynamoDBCrudPolicy:
+            TableName: !ImportValue fs-infra-CasesTableName
+      Events:
+        CriticalRule:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - finshield.monitor
+              detail-type:
+                - CaseRiskUpdated
+              detail:
+                case_score:
+                  - numeric: [">=", 0.7]
+            InputPath: $.detail
+
+Outputs:
+  ApiUrl:
+    Description: POST events here (Sneha's scripts use this)
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/events"
+  StateMachineArn:
+    Value: !Ref ResponseWorkflow

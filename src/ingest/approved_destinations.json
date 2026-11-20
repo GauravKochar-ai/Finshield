@@ -1,0 +1,5 @@
+[
+  "s3://fs-audit-vault",
+  "s3://fs-backup-mumbai",
+  "sftp://bureau-partner.finshield.in"
+]
