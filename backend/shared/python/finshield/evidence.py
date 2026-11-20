@@ -53,8 +53,24 @@ def _last_entry(alert_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
-def append(alert_id: str, entry_type: str, actor: str, payload: dict[str, Any] | None = None, ts: str | None = None) -> dict[str, Any]:
-    """Append one entry. Conditional put on seq; retries when another writer took the seq."""
+def find_by_dedup_key(alert_id: str, dedup_key: str) -> dict[str, Any] | None:
+    for e in chain(alert_id):
+        if (e.get("payload") or {}).get("dedup_key") == dedup_key:
+            return e
+    return None
+
+
+def append(alert_id: str, entry_type: str, actor: str, payload: dict[str, Any] | None = None, ts: str | None = None, dedup_key: str | None = None) -> dict[str, Any]:
+    """Append one entry. Conditional put on seq; retries when another writer took the seq.
+
+    ``dedup_key`` makes the call idempotent: if an entry with the same key exists, it is returned
+    and nothing is written (Step Functions retries, duplicate events). The key is stored in the payload.
+    """
+    if dedup_key:
+        existing = find_by_dedup_key(alert_id, dedup_key)
+        if existing:
+            return existing
+        payload = {**(payload or {}), "dedup_key": dedup_key}
     for _ in range(MAX_APPEND_RETRIES):
         last = _last_entry(alert_id)
         seq = (last["seq"] + 1) if last else 1

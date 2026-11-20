@@ -4,9 +4,9 @@ P0 carries the mandatory demo, P1 the other scenarios and judging points, P2 dep
 
 ## P0
 
-- [ ] P0.1 `ai_explain` with masked facts, schema and `numbers_used` check, 8 s budget, template fallback
+- [x] P0.1 `ai_explain` with masked facts, schema and `numbers_used` check, 8 s budget, template fallback
 - [x] P0.2 Guardrail with PII filters and Aadhaar and PAN regexes (resource defined in the template)
-- [ ] P0.3 Test on `contract/fixtures/alert_sc01.json`; show fallback with Bedrock off
+- [x] P0.3 Test on `contract/fixtures/alert_sc01.json`; show fallback with Bedrock off
 
 ## P1
 

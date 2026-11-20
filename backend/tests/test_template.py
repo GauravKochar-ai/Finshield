@@ -34,6 +34,10 @@ def _fn_dirs():
     return sorted(p.name for p in FUNCS.iterdir() if (p / "app.py").is_file())
 
 
+def _stub_dirs():
+    return [n for n in _fn_dirs() if "stub.handle(" in (FUNCS / n / "app.py").read_text()]
+
+
 def test_every_function_dir_is_registered_and_vice_versa():
     registered = sorted(v["Properties"]["CodeUri"].rstrip("/").split("/")[-1] for v in FN_RES.values())
     assert registered == _fn_dirs()
@@ -119,7 +123,7 @@ def _load(name):
     return mod
 
 
-@pytest.mark.parametrize("name", _fn_dirs())
+@pytest.mark.parametrize("name", _stub_dirs())
 def test_stub_logs_and_returns_ok(name, caplog):
     out = _load(name).handler({"alert_id": "ALR-20261120-0007", "event_id": "evt-1"}, None)
     assert out == {"status": "OK", "function": name, "stub": True}

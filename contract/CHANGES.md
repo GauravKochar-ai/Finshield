@@ -36,3 +36,11 @@
 - Extra buckets: `external-sim` (real-mode destination), `trail` (CloudTrail logs), optional `config`.
 - Bucket names are fixed by the contract and global; a clash fails the deploy.
 - The template has been linted only, never deployed. Guardrail PII types and Object Lock need a real deploy to confirm.
+
+## OPEN-7: response and AI layer behaviour (Keshav, P0 done)
+- `containment_mode` in SSM decides LIVE vs DRY_RUN and is read fresh on every call; the state machine's `mode` input is only a fallback. LIVE runs only against principals named `finshield-dev-demo-*`; any other principal is forced to DRY_RUN and the reason is recorded.
+- Containment results use `result` OK, FAILED or NOT_APPLICABLE (roles have no access keys, so DEACTIVATE_KEYS on the SC-01 role principal is NOT_APPLICABLE).
+- Evidence appends from the workflow are idempotent: payload carries `dedup_key = <execution name>:<type>`.
+- Alert status moves OPEN → CONTAINED (end of the containment branch) → AWAITING_APPROVAL (before the approval wait), set by the state machine with a conditional DynamoDB update; each change also emits `Incident Updated`.
+- `ai_explain` accepts `{"force_fallback": true}`. It rejects Bedrock output whose numbers are not computed facts or whose clauses are not in `backend/functions/ai_explain/regulations.json`. That file is the boilerplate's regulation list, NOT VERIFIED; fallback text marks each clause "pending verification" until Arvind replaces it.
+- `contain_bucket_deny` edits the KYC bucket policy at runtime; the next `sam deploy` resets it to the template (removes any deny).

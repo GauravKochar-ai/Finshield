@@ -751,6 +751,9 @@ Resources:
       FunctionName: !Sub finshield-${Stage}-contain-dns-block
       Description: "Route 53 Resolver DNS Firewall block (P2, behind EnableDnsFirewall)"
       CodeUri: ../backend/functions/contain_dns_block/
+      Environment:
+        Variables:
+          DNS_DOMAIN_LIST_ID: !If [CreateDnsFirewall, !Ref BlockedDomains, '']
       Policies:
         - Statement:
             - Sid: DnsFirewall
@@ -1382,6 +1385,8 @@ Resources:
         QuarantineFnArn: !GetAtt QuarantineFunction.Arn
         AlertTopicArn: !Ref AlertTopic
         ContainmentMode: !Ref ContainmentMode
+        AlertsTable: !Ref AlertsTable
+        BusName: !Ref Bus
       Logging:
         Level: ERROR
         IncludeExecutionData: false
@@ -1399,6 +1404,15 @@ Resources:
         - LambdaInvokePolicy: { FunctionName: !Ref DecisionFunction }
         - LambdaInvokePolicy: { FunctionName: !Ref QuarantineFunction }
         - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertTopic.TopicName }
+        - Statement:
+            - Sid: AlertStatusOnly
+              Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource: !GetAtt AlertsTable.Arn
+            - Sid: IncidentUpdatedEvents
+              Effect: Allow
+              Action: [events:PutEvents]
+              Resource: !GetAtt Bus.Arn
         - Statement:
             - Effect: Allow
               Action: [logs:CreateLogDelivery, logs:GetLogDelivery, logs:UpdateLogDelivery, logs:DeleteLogDelivery, logs:ListLogDeliveries, logs:PutResourcePolicy, logs:DescribeResourcePolicies, logs:DescribeLogGroups]
