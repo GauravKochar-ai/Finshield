@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { api, can, type Alert } from '@/lib/api';
+import { api, can, type Alert, type AskResult } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useLoad } from '@/lib/hooks';
 import { useAlerts } from '@/components/Shell';
@@ -126,7 +126,7 @@ function Detail({ id }: { id: string }) {
 
 function AiCard({ alert: a, groups }: { alert: Alert; groups: Parameters<typeof can.ask>[0] }) {
   const ai = a.ai;
-  const [q, setQ] = useState(''), [ans, setAns] = useState<{ answer: string; sources: string[] } | null>(null), [busy, setBusy] = useState(false), [err, setErr] = useState('');
+  const [q, setQ] = useState(''), [ans, setAns] = useState<AskResult | null>(null), [busy, setBusy] = useState(false), [err, setErr] = useState('');
   const ask = async () => {
     if (!q.trim()) return; setBusy(true); setErr('');
     try { setAns(await api.askFinShield(a.alert_id, q)); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
@@ -150,7 +150,9 @@ function AiCard({ alert: a, groups }: { alert: Alert; groups: Parameters<typeof 
           <div className="row"><input className="field" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} placeholder="Ask FinShield about this incident…" />
             <button className="btn primary" disabled={busy} onClick={ask}>{busy ? '…' : 'Ask'}</button></div>
           {err && <div className="err" style={{ marginTop: 8 }}>{err}</div>}
-          {ans && <div style={{ marginTop: 10, fontSize: 13, color: '#cfd7e8', lineHeight: 1.55 }}>{ans.answer}</div>}
+          {ans && <div style={{ marginTop: 10, fontSize: 13, color: '#cfd7e8', lineHeight: 1.55 }}>
+            {ans.ai_status && <span className="pill" style={{ marginRight: 8, fontSize: 11, background: ans.ai_status === 'OK' ? 'rgba(167,139,250,.15)' : 'rgba(148,163,184,.15)', color: ans.ai_status === 'OK' ? '#a78bfa' : '#94a3b8' }}>{ans.ai_status === 'OK' ? 'AI' : 'Rule-based'}</span>}
+            {ans.answer}</div>}
         </div>)}
     </div>
   );

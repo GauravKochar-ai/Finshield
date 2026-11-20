@@ -70,3 +70,13 @@
 - S3 matches `signals.S3.emergency_roles = ["KYC-Emergency"]`. The template has no role with that name; real mode via
   CloudTrail needs either a role named KYC-Emergency or this list extended. TimeToDetectMs uses event ts, which the simulator
   sets to the scenario clock time (can be hours ago); test_runner's time_to_alert_ms measures from send time instead.
+## CHANGE-9 (final deploy, Keshav): ask ai_status, AI budgets for Mistral Large 3, Bedrock IAM scope
+- `POST /alerts/{id}/ask` data gets optional `ai_status` (`OK` = model answer accepted by the number check,
+  `FALLBACK` = rule-based answer from the same facts). `api_ask.json` shows `OK`. The admin Ask panel shows "AI" / "Rule-based".
+- Model `mistral.mistral-large-3-675b-instruct` (Makefile `MODEL_ID` default, so `make deploy` keeps SSM on it).
+  Budgets: ai_explain `AI_BUDGET_S=20` and the three `*AiExplain` states `TimeoutSeconds` 25 (was 6 / 8);
+  ai_reports `timeout_s` 25, Lambda Timeout 150; ask `timeout_s` 20 (HTTP API caps at 30 s); kyc_label 30.
+- ai_explain facts: regulations carry only `regulation` + `clause` (no `summary`), no `window`; max_tokens 700; the system
+  prompt forbids arithmetic (a live answer summed numbers into 215, which the number check rejected).
+- kyc_label vision now goes through `finshield.bedrock.converse(image=...)`, so the Guardrail and temperature 0 apply.
+- Bedrock statements are scoped to `arn:aws:bedrock:<region>::foundation-model/*` plus the stack guardrail ARN.

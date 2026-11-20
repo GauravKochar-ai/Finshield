@@ -484,6 +484,7 @@ components:
                 properties:
                   answer: { type: string }
                   sources: { type: array, items: { type: string } }
+                  ai_status: { type: string, enum: [OK, FALLBACK], description: 'OK = model answer accepted by the number check; FALLBACK = rule-based answer from the same facts' }
     User:
       description: User profile
       content:

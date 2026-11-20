@@ -227,6 +227,7 @@ export interface SimulateResult {
 export interface AskResult {
   answer: string;
   sources: string[];
+  ai_status?: 'OK' | 'FALLBACK';
 }
 export interface AlertFilter {
   status?: AlertStatus;
