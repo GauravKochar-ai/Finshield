@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "customer_id": "C-10001",
+      "city": "Mumbai",
+      "loan_id": "LN-SAMPLE-10001",
+      "assigned_agent": "u-031",
+      "partner_id": null,
+      "aadhaar_masked": "XXXX XXXX 1234",
+      "pan_fake": "SAMPL0001A",
+      "sample": true
+    },
+    {
+      "customer_id": "C-10002",
+      "city": "Pune",
+      "loan_id": "LN-SAMPLE-10002",
+      "assigned_agent": "u-031",
+      "partner_id": null,
+      "aadhaar_masked": "XXXX XXXX 5678",
+      "pan_fake": "SAMPL0002A",
+      "sample": true
+    },
+    {
+      "customer_id": "C-10003",
+      "city": "Nagpur",
+      "loan_id": "LN-SAMPLE-10003",
+      "assigned_agent": "u-031",
+      "partner_id": null,
+      "aadhaar_masked": "XXXX XXXX 9012",
+      "pan_fake": "SAMPL0003A",
+      "sample": true
+    }
+  ],
+  "error": null
+}

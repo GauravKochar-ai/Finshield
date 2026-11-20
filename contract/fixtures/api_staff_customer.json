@@ -1,0 +1,48 @@
+{
+  "data": {
+    "customer_id": "C-10001",
+    "city": "Mumbai",
+    "loan_id": "LN-SAMPLE-10001",
+    "assigned_agent": "u-031",
+    "partner_id": null,
+    "aadhaar_masked": "XXXX XXXX 1234",
+    "pan_fake": "SAMPL0001A",
+    "sample": true,
+    "purpose_consented": true,
+    "kyc_files": [
+      {
+        "file_id": "KYC-PAN-C-10001",
+        "doc_type": "PAN",
+        "size_kb": 49,
+        "ai_label": "PAN",
+        "unmasked_aadhaar_flag": false,
+        "available": true
+      },
+      {
+        "file_id": "KYC-AADHAAR-C-10001",
+        "doc_type": "AADHAAR",
+        "size_kb": 52,
+        "ai_label": "AADHAAR",
+        "unmasked_aadhaar_flag": false,
+        "available": true
+      },
+      {
+        "file_id": "KYC-SELFIE-C-10001",
+        "doc_type": "SELFIE",
+        "size_kb": 310,
+        "ai_label": null,
+        "unmasked_aadhaar_flag": false,
+        "available": false
+      },
+      {
+        "file_id": "KYC-ADDRESS-C-10001",
+        "doc_type": "ADDRESS",
+        "size_kb": 240,
+        "ai_label": null,
+        "unmasked_aadhaar_flag": false,
+        "available": false
+      }
+    ]
+  },
+  "error": null
+}
