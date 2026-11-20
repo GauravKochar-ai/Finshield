@@ -8,8 +8,12 @@ Groups follow x-groups in openapi.yaml ("all" = any signed-in user).
 """
 from __future__ import annotations
 
+import json
+import os
 import secrets
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 
 from boto3.dynamodb.conditions import Attr
 
@@ -114,35 +118,142 @@ def privacy():
             "unmasked_aadhaar_files": unmasked[:50], "purpose_mismatches": mism}
 
 
-def compliance():
+# ------------------------------------------------------------------ compliance map
+# Rows come from simulator/seed/compliance_controls.json (M8, verified clauses). `make layer` bundles the file next to
+# the finshield package; tests and local runs read it from the repo. Status is computed live per request.
+CONTROLS_FILE = "compliance_controls.json"
+CONTAINED = ("CONTAINED", "AWAITING_APPROVAL", "LOCKED", "RELEASED", "CLOSED")
+DRAFTED = ("DRAFT", "FALLBACK")
+NOT_YET = "UNKNOWN"
+
+# control_id -> how its status is decided. Rows not listed keep the status written in the file.
+#   template      guaranteed by infra/template.yaml (checked in test_template.py)
+#   region        the stack runs in ap-south-1
+#   chain         evidence chains verify
+#   detection     the pipeline has produced at least one alert
+#   containment   at least one alert has reached containment
+#   signal:A|B    an alert carries one of these signals
+#   deadline:X    Critical alerts carry the X readiness timer
+#   report:T      a Critical alert has a T report drafted
+#   timer_report:X:T   both of the above
+#   consent       the consent ledger has records
+#   kyc_label     KYC files have been labelled
+#   private_kyc   template guarantees, unless AWS Config reports a NON_COMPLIANT resource
+CHECKS = {
+    "IN-01": "chain", "IN-02": "template", "IN-03": "containment", "IN-04": "detection", "IN-05": "template",
+    "IN-06": "report:CUSTOMER_NOTICE", "IN-07": "report:DPB_NOTICE", "IN-08": "timer_report:DPB:DPB_NOTICE",
+    "IN-09": "consent", "IN-10": "consent", "IN-11": "consent", "IN-12": "signal:S7", "IN-13": "region",
+    "IN-14": "kyc_label", "IN-15": "timer_report:RBI:RBI_INCIDENT", "IN-16": "timer_report:CERT-In:CERTIN_FORM",
+    "IN-17": "region", "IN-20": "detection", "IN-21": "signal:S3|S5", "IN-22": "containment", "IN-23": "deadline:RBI",
+    "IN-24": "chain", "IN-25": "detection",
+    "SOC2-CC6.1": "private_kyc", "SOC2-CC6.2": "containment", "SOC2-CC6.3": "template", "SOC2-CC7.2": "detection",
+    "SOC2-CC7.3": "detection", "SOC2-CC7.4": "containment", "SOC2-CC8.1": "template", "SOC2-C1.1": "kyc_label",
+    "ISO27001-A.5.15": "template", "ISO27001-A.8.2": "signal:S3", "ISO27001-A.8.12": "signal:S1|S4",
+    "ISO27001-A.8.15": "template", "ISO27001-A.8.16": "detection", "ISO27001-A.5.24": "template",
+    "ISO27001-A.5.25": "detection", "ISO27001-A.5.26": "containment", "ISO27001-A.5.28": "chain",
+    "ISO27001-A.5.34": "kyc_label", "ISO27001-A.8.24": "template",
+}
+
+
+@lru_cache(maxsize=1)
+def _controls() -> list[dict]:
+    import finshield
+
+    places = [Path(finshield.__file__).resolve().parent / CONTROLS_FILE]               # Lambda layer
+    places += [p / "simulator" / "seed" / CONTROLS_FILE for p in Path(__file__).resolve().parents]  # repo checkout
+    for p in places:
+        if p.is_file():
+            return json.loads(p.read_text(encoding="utf-8"))
+    raise HttpError(500, "CONFIG_MISSING", f"{CONTROLS_FILE} is not bundled; run `make build`")
+
+
+def _has_rows(logical) -> bool:
+    return ddb.table(logical).scan(Select="COUNT", Limit=1).get("Count", 0) > 0
+
+
+def _facts() -> dict:
     alerts = _scan("Alerts")
-    chains_ok = all(evidence.verify(a["alert_id"])["valid"] for a in alerts[:20])
-    config_rows = _scan("Posture")
-    public_kyc = any(p.get("status") == "NON_COMPLIANT" for p in config_rows)
-    crit = any(a["severity"] == "CRITICAL" for a in alerts)
+    reports = _scan("Reports", ProjectionExpression="alert_id, report_type, #s", ExpressionAttributeNames={"#s": "status"})
+    crit = [a for a in alerts if a.get("severity") == "CRITICAL"]
+    return {
+        "alerts": alerts,
+        "crit": crit,
+        "drafted": {(r["alert_id"], r["report_type"]) for r in reports if r.get("status") in DRAFTED},
+        "chains": [evidence.verify(a["alert_id"])["valid"] for a in alerts[:20]],
+        "noncompliant": sum(1 for p in _scan("Posture") if p.get("status") == "NON_COMPLIANT"),
+        "consent": _has_rows("Consent"),
+        "kyc": _has_rows("KycFiles"),
+        "region": os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "",
+    }
 
-    def c(cid, obligation, control, ev, screen, status):
-        return {"control_id": cid, "obligation": obligation, "finshield_control": control, "evidence": ev, "screen": screen,
-                "status": status, "verify_clause": True}
 
-    return [
-        c("CTL-01", "Reasonable security safeguards (DPDP-aligned readiness and controls)",
-          "Detection, containment and sealed evidence", "Evidence chain", "Alert detail", "IN_PLACE" if chains_ok else "GAP"),
-        c("CTL-02", "Report cyber incidents to RBI within 6 hours (readiness timer)", "Deadline timers and RBI draft",
-          "Reports table", "Reports", "IN_PLACE" if crit else "READY"),
-        c("CTL-03", "Report to CERT-In within 6 hours (readiness timer)", "Deadline timers and CERT-In draft", "Reports table",
-          "Reports", "IN_PLACE" if crit else "READY"),
-        c("CTL-04", "Breach notice to the Data Protection Board (DPDP-aligned readiness and controls)",
-          "DPB and customer notice drafts", "Reports table", "Reports", "IN_PLACE" if crit else "READY"),
-        c("CTL-05", "Use personal data only for the consented purpose (DPDP-aligned readiness and controls)",
-          "S9 purpose mismatch sign", "Alerts with S9", "Privacy", "IN_PLACE"),
-        c("CTL-06", "Privileged access closely monitored (RBI)", "S3 emergency role and S5 risky login signs", "Alerts",
-          "Overview", "IN_PLACE"),
-        c("CTL-07", "No sensitive data store open to the internet", "AWS Config rule and S11 sign", "Posture table",
-          "Overview", "GAP" if public_kyc else "IN_PLACE"),
-        c("CTL-08", "Tamper-evident audit trail", "SHA-256 hash chain, Object Lock export", "Evidence verify", "Evidence",
-          "IN_PLACE" if chains_ok else "GAP"),
-    ]
+def _status(check: str, f: dict) -> tuple[str, str]:
+    """(status, short reason) for one check, from live data."""
+    kind, _, arg = check.partition(":")
+    alerts, crit = f["alerts"], f["crit"]
+    no_crit = (NOT_YET, "No Critical incident yet")
+    if kind == "template":
+        return "IN_PLACE", "Set in infra/template.yaml"
+    if kind == "region":
+        ok = f["region"] == "ap-south-1"
+        return ("IN_PLACE" if ok else "GAP"), f"Running in {f['region'] or 'an unknown region'}"
+    if kind == "private_kyc":
+        if f["noncompliant"]:
+            return "GAP", f"AWS Config reports {f['noncompliant']} non-compliant resource(s)"
+        return "IN_PLACE", "Private, KMS-encrypted bucket; no AWS Config findings"
+    if kind == "chain":
+        if not f["chains"]:
+            return NOT_YET, "No evidence chain yet"
+        bad = f["chains"].count(False)
+        return ("GAP", f"{bad} evidence chain(s) fail verification") if bad else \
+               ("IN_PLACE", f"{len(f['chains'])} evidence chain(s) verify")
+    if kind == "detection":
+        return ("IN_PLACE", f"{len(alerts)} alert(s) raised") if alerts else (NOT_YET, "No alert yet")
+    if kind == "containment":
+        n = sum(1 for a in alerts if a.get("status") in CONTAINED)
+        return ("IN_PLACE", f"{n} alert(s) contained") if n else (NOT_YET, "No alert contained yet")
+    if kind == "signal":
+        codes = set(arg.split("|"))
+        n = sum(1 for a in alerts if codes & {s.get("code") for s in a.get("signals") or []})
+        return ("IN_PLACE", f"{n} alert(s) with {'/'.join(sorted(codes))}") if n else \
+               (NOT_YET, f"No {'/'.join(sorted(codes))} alert yet")
+    if kind == "consent":
+        return ("IN_PLACE", "Consent ledger loaded") if f["consent"] else (NOT_YET, "Consent ledger is empty")
+    if kind == "kyc_label":
+        return ("IN_PLACE", "KYC files labelled") if f["kyc"] else (NOT_YET, "No KYC files labelled yet")
+    if kind == "deadline":
+        if not crit:
+            return no_crit
+        ok = any(d.get("body") == arg for a in crit for d in a.get("deadlines") or [])
+        return ("IN_PLACE", f"{arg} timer running") if ok else ("GAP", f"Critical alert without a {arg} timer")
+    if kind == "report":
+        if not crit:
+            return no_crit
+        ok = any((a["alert_id"], arg) in f["drafted"] for a in crit)
+        return ("IN_PLACE", f"{arg} drafted") if ok else ("GAP", f"Critical alert without a {arg} draft")
+    if kind == "timer_report":
+        body_, report = arg.split(":")
+        timer, draft = _status(f"deadline:{body_}", f), _status(f"report:{report}", f)
+        for s in ("GAP", NOT_YET):
+            for st in (timer, draft):
+                if st[0] == s:
+                    return st
+        return "IN_PLACE", f"{body_} timer running and {report} drafted"
+    return NOT_YET, f"unknown check {check}"
+
+
+def compliance():
+    f = _facts()
+    out = []
+    for row in _controls():
+        r = dict(row)
+        check = CHECKS.get(r["control_id"])
+        if check and r.get("status") != "NOT_APPLICABLE":
+            r["status"], r["status_detail"] = _status(check, f)
+        else:
+            r["status_detail"] = "Not claimed by FinShield" if r.get("status") == "NOT_APPLICABLE" else "Not checked live"
+        out.append(r)
+    return out
 
 
 def user(uid):

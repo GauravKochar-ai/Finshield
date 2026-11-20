@@ -39,6 +39,7 @@ layer:
 	cp -R contract/schemas contract/fixtures $(LAYER)/python/finshield/contract/
 	cp -R simulator/scenarios $(LAYER)/python/finshield/scenarios
 	cp simulator/seed/generate.py $(LAYER)/python/finshield/seedgen.py
+	cp simulator/seed/compliance_controls.json $(LAYER)/python/finshield/compliance_controls.json
 	$(PIP) install --quiet --target $(LAYER)/python --platform manylinux2014_aarch64 --python-version 3.12 --implementation cp --only-binary=:all: --upgrade -r backend/shared/requirements.txt
 
 build: layer
