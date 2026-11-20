@@ -593,6 +593,7 @@ Resources:
       FunctionName: !Sub finshield-${Stage}-baseline
       Description: "Hourly baselines per user and team (M3)"
       CodeUri: ../backend/functions/baseline/
+      Timeout: 120
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref EventsTable
@@ -751,6 +752,9 @@ Resources:
       FunctionName: !Sub finshield-${Stage}-contain-dns-block
       Description: "Route 53 Resolver DNS Firewall block (P2, behind EnableDnsFirewall)"
       CodeUri: ../backend/functions/contain_dns_block/
+      Environment:
+        Variables:
+          DNS_DOMAIN_LIST_ID: !If [CreateDnsFirewall, !Ref BlockedDomains, '']
       Policies:
         - Statement:
             - Sid: DnsFirewall
@@ -1007,6 +1011,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlertsTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref EventsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref CountersTable
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
@@ -1037,6 +1043,8 @@ Resources:
             TableName: !Ref AlertsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AccuracyRunsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CountersTable
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
         - Statement:
@@ -1382,6 +1390,8 @@ Resources:
         QuarantineFnArn: !GetAtt QuarantineFunction.Arn
         AlertTopicArn: !Ref AlertTopic
         ContainmentMode: !Ref ContainmentMode
+        AlertsTable: !Ref AlertsTable
+        BusName: !Ref Bus
       Logging:
         Level: ERROR
         IncludeExecutionData: false
@@ -1399,6 +1409,15 @@ Resources:
         - LambdaInvokePolicy: { FunctionName: !Ref DecisionFunction }
         - LambdaInvokePolicy: { FunctionName: !Ref QuarantineFunction }
         - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertTopic.TopicName }
+        - Statement:
+            - Sid: AlertStatusOnly
+              Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource: !GetAtt AlertsTable.Arn
+            - Sid: IncidentUpdatedEvents
+              Effect: Allow
+              Action: [events:PutEvents]
+              Resource: !GetAtt Bus.Arn
         - Statement:
             - Effect: Allow
               Action: [logs:CreateLogDelivery, logs:GetLogDelivery, logs:UpdateLogDelivery, logs:DeleteLogDelivery, logs:ListLogDeliveries, logs:PutResourcePolicy, logs:DescribeResourcePolicies, logs:DescribeLogGroups]
@@ -1420,7 +1439,7 @@ Resources:
             Statement:
               - { Effect: Allow, Action: ['s3:GetObject', 's3:ListBucket'], Resource: [!GetAtt KycBucket.Arn, !Sub '${KycBucket.Arn}/*'] }
               - { Effect: Allow, Action: ['kms:Decrypt'], Resource: !GetAtt DataKey.Arn }
-      Tags: [{ Key: project, Value: finshield }]
+      Tags: [{ Key: project, Value: finshield }, { Key: emergency, Value: 'true' }]
   DemoKycUser:
     Type: AWS::IAM::User
     Properties:
@@ -1433,6 +1452,8 @@ Resources:
               - { Effect: Allow, Action: ['s3:GetObject', 's3:ListBucket'], Resource: [!GetAtt KycBucket.Arn, !Sub '${KycBucket.Arn}/*'] }
               - { Effect: Allow, Action: ['kms:Decrypt'], Resource: !GetAtt DataKey.Arn }
               - { Effect: Allow, Action: ['s3:PutObject'], Resource: !Sub '${ExternalSimBucket.Arn}/*' }
+              # from boilerplate: real mode switches to the emergency/ops-admin role
+              - { Effect: Allow, Action: ['sts:AssumeRole'], Resource: !GetAtt DemoOpsAdminRole.Arn }
       Tags: [{ Key: project, Value: finshield }]
   DemoKycUserKey:
     Type: AWS::IAM::AccessKey
@@ -1665,3 +1686,9 @@ Outputs:
     Value: !Ref AWS::Region
   DemoKeySecretName:
     Value: !Ref DemoKycUserSecret
+  DemoKycUserName:
+    Description: Real-mode demo IAM user (from boilerplate DemoIamUser output)
+    Value: !Ref DemoKycUser
+  DemoOpsAdminRoleArn:
+    Description: Role the real-mode script assumes
+    Value: !GetAtt DemoOpsAdminRole.Arn

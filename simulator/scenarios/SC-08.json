@@ -1,0 +1,52 @@
+{
+ "scenario_id": "SC-08",
+ "title": "Agent changes a borrower's bank account from a new device; Rs 4.8 lakh disbursed to it at 01:40",
+ "user_id": "u-032",
+ "start_time_ist": "01:20:00",
+ "expected_score": 65,
+ "expected_level": "HIGH",
+ "signs": [
+  "S10 50",
+  "S6 10",
+  "S5 5"
+ ],
+ "sample": true,
+ "events": [
+  {
+   "offset_seconds": 0,
+   "event_id": "sc-08-0001",
+   "source": "simulator",
+   "action": "LOGIN",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-032",
+   "city": "Mumbai",
+   "device_id": "d-new-88",
+   "ip": "49.36.200.7"
+  },
+  {
+   "offset_seconds": 300,
+   "event_id": "sc-08-0002",
+   "source": "simulator",
+   "action": "BANK_ACCOUNT_CHANGE",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-032",
+   "city": "Mumbai",
+   "device_id": "d-new-88",
+   "ip": "49.36.200.7",
+   "customer_id": "C-10250",
+   "data_class": "FINANCIAL"
+  },
+  {
+   "offset_seconds": 1200,
+   "event_id": "sc-08-0003",
+   "source": "simulator",
+   "action": "DISBURSE",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-u-032",
+   "city": "Mumbai",
+   "device_id": "d-new-88",
+   "ip": "49.36.200.7",
+   "customer_id": "C-10250",
+   "amount_inr": 480000,
+   "data_class": "FINANCIAL",
+   "purpose": "loan_processing"
+  }
+ ]
+}

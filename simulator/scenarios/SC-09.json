@@ -1,0 +1,23 @@
+{
+ "scenario_id": "SC-09",
+ "title": "KYC bucket made public; Config marks it non-compliant",
+ "user_id": "svc-aws-config",
+ "start_time_ist": "16:10:00",
+ "expected_score": 45,
+ "expected_level": "MEDIUM",
+ "signs": [
+  "S11 45"
+ ],
+ "sample": true,
+ "events": [
+  {
+   "offset_seconds": 0,
+   "event_id": "sc-09-0001",
+   "source": "config",
+   "action": "CONFIG_NONCOMPLIANT",
+   "principal_arn": "arn:aws:iam::000000000000:user/sample-svc-aws-config",
+   "resource_arn": "arn:aws:s3:::finshield-dev-kyc-docs",
+   "data_class": "KYC"
+  }
+ ]
+}
