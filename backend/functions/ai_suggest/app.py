@@ -7,16 +7,22 @@ Tasks (event {"task": ..., "alert_id": ...}). EventBridge "Alert Raised" runs SE
   DIGEST              shift handover over the open alerts (event {"task": "DIGEST"})
 Results go to the AiSuggestions table, key (alert_id, task); the digest uses alert_id "DIGEST".
 Bedrock only writes words. Code checks enums, numbers and citations; on any failure a template from the same facts is stored (status FALLBACK).
-Pass {"force": true} to regenerate. Without it an existing result is kept (idempotent on alert_id + task).
+Pass {"force": true} to regenerate. Without it an existing result for the same score is kept (idempotent on alert_id + task
++ score; an escalated alert gets fresh results).
+After its tasks are stored it asynchronously invokes slack_notify ({"ai_followup": true, ...}) so the Slack AI message
+always carries the finished suggestions. CRITICAL: after CONTAINMENT_ADVICE (AWAITING_APPROVAL). HIGH/MEDIUM: after
+SECOND_OPINION and COMPLIANCE_MAP. A Slack trigger failure is logged and never fails the tasks.
 """
 from __future__ import annotations
 import hashlib
 import json
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+import boto3
 from boto3.dynamodb.conditions import Key
 from finshield import bedrock, config, ddb
 from finshield.log import log
@@ -229,7 +235,8 @@ def after_checks(task: str, out: dict[str, Any], facts: dict[str, Any]) -> dict[
         out["computed_severity"] = facts["severity"]
     return out
 def run_task(task: str, key: str, facts: dict[str, Any], force: bool) -> dict[str, Any]:
-    if not force and ddb.get_item("AiSuggestions", {"alert_id": key, "task": task}, consistent=True):
+    existing = None if force else ddb.get_item("AiSuggestions", {"alert_id": key, "task": task}, consistent=True)
+    if existing and existing.get("score") == facts.get("score"):
         log("suggestion exists, kept", alert_id=key, task=task)
         return {"alert_id": key, "task": task, "written": False, "reason": "exists"}
     out, meta = ask_model(task, facts, time.monotonic() + BUDGET_S)
@@ -240,7 +247,8 @@ def run_task(task: str, key: str, facts: dict[str, Any], force: bool) -> dict[st
     if task == "CONTAINMENT_ADVICE" and not out["actions"]:
         out["note"] = "No further containment action suggested."
     item = {"alert_id": key, "task": task, "status": status, "output": out, "model_id": meta.get("model_id"), "generated_at": now(),
-            "review_status": "PROPOSED" if task in ("CONTAINMENT_ADVICE", "COMPLIANCE_MAP") else "INFO", "reason": meta.get("reason")}
+            "review_status": "PROPOSED" if task in ("CONTAINMENT_ADVICE", "COMPLIANCE_MAP") else "INFO", "reason": meta.get("reason"),
+            "score": facts.get("score"), "severity": facts.get("severity")}
     ddb.put_item("AiSuggestions", {k: v for k, v in item.items() if v is not None})
     log("ai suggestion", alert_id=key, task=task, status=status, attempts=meta.get("attempts"), reason=meta.get("reason"))
     return {"alert_id": key, "task": task, "written": True, "status": status}
@@ -256,6 +264,16 @@ def digest_facts() -> dict[str, Any]:
     return {"as_of": now(), "open_alerts": len(alerts), "by_severity": by_sev, "alerts": [
         {"alert_id": a["alert_id"], "subject": pseudonym(a["user_id"]), "severity": a["severity"], "score": a["score"], "status": a["status"],
          "customers_affected": a["customers_affected"], "signal_codes": [s["code"] for s in a.get("signals", [])]} for a in alerts]}
+def trigger_slack(alert: dict[str, Any]) -> None:
+    fn = os.environ.get("SLACK_NOTIFY_FN")
+    if not fn:
+        return
+    payload = {"ai_followup": True, "alert_id": alert["alert_id"], "severity": alert["severity"], "score": alert["score"]}
+    try:
+        boto3.client("lambda", region_name=config.region()).invoke(FunctionName=fn, InvocationType="Event", Payload=json.dumps(payload).encode("utf-8"))
+        log("slack ai follow-up triggered", alert_id=alert["alert_id"], severity=alert["severity"])
+    except Exception as exc:  # Slack must never break the AI tasks
+        log("slack ai follow-up trigger failed", level="WARNING", alert_id=alert["alert_id"], error=exc.__class__.__name__)
 def handler(event, context=None):
     detail_type = event.get("detail-type")
     detail = event.get("detail") or {}
@@ -285,4 +303,6 @@ def handler(event, context=None):
         except Exception as exc:  # one failing task must not stop the others
             log("ai suggestion failed", level="ERROR", alert_id=alert_id, task=t, error=str(exc))
             results.append({"alert_id": alert_id, "task": t, "written": False, "reason": "error"})
+    if detail_type == "Incident Updated" or (detail_type == "Alert Raised" and alert["severity"] != "CRITICAL"):
+        trigger_slack(alert)
     return results

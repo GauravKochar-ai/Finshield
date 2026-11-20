@@ -1,12 +1,13 @@
 """slack_notify: formatted Slack messages (Block Kit), two kinds:
-  1. "Alert Raised": the detection message (score, signs, readiness timers); sent again if severity escalates.
-  2. "Incident Updated" with status AWAITING_APPROVAL: the FinShield AI analysis (explanation, second opinion, containment
-     taken, proposed next steps, rules affected). By then ai_explain and containment have finished.
+  1. Detection, on "Alert Raised": score, signs, readiness timers. Sent once per severity (escalation sends again).
+  2. FinShield AI analysis, on {"ai_followup": true, "alert_id": ...} from ai_suggest once its results are stored:
+     explanation (ai_explain), second opinion, containment taken, containment advice, compliance mapping.
+     CRITICAL: after containment (AWAITING_APPROVAL). HIGH/MEDIUM: after second opinion and compliance mapping.
+     Sent once per alert and severity. It waits briefly for ai_explain, which runs in the state machine.
 Webhook URL: SSM SecureString /finshield/<stage>/slack_webhook_url (env FINSHIELD_SETTING_SLACK_WEBHOOK_URL wins).
-Unset or "NONE" means Slack is off: nothing is sent, nothing fails. A Slack error is logged and never raised, so it
-cannot disturb detection or the incident workflow. Idempotent on (alert_id, severity) via the AiSuggestions table.
-The message carries only computed facts: no names, Aadhaar or PAN; the person appears by user id only.
-Optional SSM /finshield/<stage>/portal_url adds an "Open case" button.
+Unset or "NONE" means Slack is off: nothing is sent, nothing fails. A Slack error is logged and never raised.
+The message carries only computed facts and AI words checked by code: no names, Aadhaar or PAN.
+Optional SSM /finshield/<stage>/portal_url adds a button.
 """
 from __future__ import annotations
 import json
@@ -23,8 +24,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 STYLE = {"CRITICAL": ("#D92D20", ":rotating_light:"), "HIGH": ("#F79009", ":warning:"), "MEDIUM": ("#EAAA08", ":large_yellow_circle:")}
 HIDE = {"name", "name_pseudo", "email", "phone", "aadhaar", "aadhaar_number", "pan", "pan_number", "address"}
 MAX_FACTS = 4
-ADVICE_WAIT_S = 3.0  # ai_suggest writes CONTAINMENT_ADVICE from the same event; poll briefly for it
-ADVICE_TRIES = 3
+AI_WAIT_S = 3.0  # ai_explain runs in the state machine (budget up to 25 s); poll for it
+AI_TRIES = 9
 def webhook_url() -> str | None:
     url = os.environ.get("FINSHIELD_SETTING_SLACK_WEBHOOK_URL")
     if url is None:
@@ -100,10 +101,7 @@ def build_message(alert: dict[str, Any], previous_severity: str | None, portal_u
     return {"text": f"{sev} alert {alert['alert_id']}, score {alert['score']}", "attachments": [{"color": color, "blocks": blocks}]}
 def _bullets(items: list[str], limit: int = 5) -> str:
     return "\n".join(f"\u2022 {x}" for x in items[:limit])
-def suggestion(alert_id: str, task: str) -> dict[str, Any] | None:
-    item = ddb.get_item("AiSuggestions", {"alert_id": alert_id, "task": task})
-    return item.get("output") if item else None
-def build_ai_message(alert: dict[str, Any], second: dict[str, Any] | None, advice: dict[str, Any] | None, portal_url: str | None) -> dict[str, Any]:
+def build_ai_message(alert: dict[str, Any], second: dict[str, Any] | None, advice: dict[str, Any] | None, portal_url: str | None, compliance: dict[str, Any] | None = None) -> dict[str, Any]:
     sev, ai = alert["severity"], alert.get("ai") or {}
     color, _ = STYLE.get(sev, STYLE["MEDIUM"])
     cap = config.load_config()["score_cap"]
@@ -128,6 +126,8 @@ def build_ai_message(alert: dict[str, Any], second: dict[str, Any] | None, advic
         verdict = "agrees with the computed severity" if second.get("agrees_with_score") else f"differs from the computed severity ({second.get('computed_severity')})"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":mag: *Second opinion:* {second['risk_rating']}, {verdict}\n_{second['reasoning']}_"[:2900]}})
     blocks.append({"type": "divider"})
+    if second and second.get("missed_considerations"):
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Also consider*\n" + _bullets(second["missed_considerations"], 3)}})
     done = [f"{c['action']} ({c.get('mode')}, {c.get('result')})" for c in alert.get("containment") or []]
     if done:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":shield: *Containment taken* (reversible)\n" + _bullets(done)}})
@@ -136,47 +136,62 @@ def build_ai_message(alert: dict[str, Any], second: dict[str, Any] | None, advic
     if nxt:
         label = "AI-proposed next steps (need approval)" if (advice or {}).get("actions") else "Recommended next steps"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":white_check_mark: *{label}*\n" + _bullets(nxt)[:2900]}})
-    rules = [f"{r['regulation']}, {r['clause']}" for r in ai.get("rules_affected", [])]
-    if rules:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":scales: *Rules in scope* (DPDP-aligned readiness and controls)\n" + _bullets(rules, 4)}})
-    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":hourglass_flowing_sand: *Waiting for a human decision.* Approve or reject the lock-down in the portal."}})
+    controls = (compliance or {}).get("controls") or []
+    if controls:
+        lines = [f"*{c['regulation']}, {c['clause']}*\n      Gap: {c['gap']}\n      Control: {c['suggested_control']}" for c in controls[:4]]
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":scales: *Compliance mapping* (DPDP-aligned readiness and controls)\n" + "\n".join(lines)[:2900]}})
+    else:
+        rules = [f"{r['regulation']}, {r['clause']}" for r in ai.get("rules_affected", [])]
+        if rules:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":scales: *Rules in scope* (DPDP-aligned readiness and controls)\n" + _bullets(rules, 4)}})
+    if sev == "CRITICAL":
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":hourglass_flowing_sand: *Waiting for a human decision.* Approve or reject the lock-down in the portal."}})
+    else:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":eyes: *Analyst review needed.* No automatic lock-down at this severity."}})
     if portal_url:
-        blocks.append({"type": "actions", "elements": [{"type": "button", "style": "danger" if sev == "CRITICAL" else "primary", "text": {"type": "plain_text", "text": "Review and decide"}, "url": f"{portal_url.rstrip('/')}/alerts/{alert['alert_id']}"}]})
+        blocks.append({"type": "actions", "elements": [{"type": "button", "style": "danger" if sev == "CRITICAL" else "primary", "text": {"type": "plain_text", "text": "Review and decide" if sev == "CRITICAL" else "Open case"}, "url": f"{portal_url.rstrip('/')}/alerts/{alert['alert_id']}"}]})
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "AI-generated, advisory  |  FinShield AI  |  ap-south-1  |  SAMPLE data"}]})
     return {"text": f"FinShield AI analysis for {alert['alert_id']}: score {alert['score']} ({sev})", "attachments": [{"color": color, "blocks": blocks}]}
 def post(url: str, message: dict[str, Any]) -> None:
     req = urllib.request.Request(url, data=json.dumps(message).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 (URL checked to be hooks.slack.com)
         resp.read()
+def suggestion_for(alert: dict[str, Any], task: str) -> dict[str, Any] | None:
+    """Output of a stored suggestion, only if it was made for the alert's current score."""
+    item = ddb.get_item("AiSuggestions", {"alert_id": alert["alert_id"], "task": task}, consistent=True)
+    if not item or item.get("score", alert["score"]) != alert["score"]:
+        return None
+    return item.get("output")
+def wait_for_ai(alert_id: str) -> dict[str, Any] | None:
+    alert = ddb.get_item("Alerts", {"alert_id": alert_id}, consistent=True)
+    for _ in range(AI_TRIES - 1):
+        if not alert or alert.get("ai"):
+            break
+        time.sleep(AI_WAIT_S)
+        alert = ddb.get_item("Alerts", {"alert_id": alert_id}, consistent=True)
+    return alert
 def handler(event, context=None):
-    detail = event.get("detail") or event
+    followup = bool(event.get("ai_followup"))
+    detail = event if followup else (event.get("detail") or event)
     alert_id = detail.get("alert_id")
-    ai_message = event.get("detail-type") == "Incident Updated"
-    if ai_message and detail.get("status") != "AWAITING_APPROVAL":
-        return {"sent": False, "reason": "not AWAITING_APPROVAL"}
     url = webhook_url()
     if not url:
         log("slack not configured, skipped", alert_id=alert_id)
         return {"sent": False, "reason": "not configured"}
-    alert = ddb.get_item("Alerts", {"alert_id": alert_id}, consistent=True) if alert_id else None
+    alert = (wait_for_ai(alert_id) if followup else ddb.get_item("Alerts", {"alert_id": alert_id}, consistent=True)) if alert_id else None
     if not alert:
         log("alert not found, slack skipped", level="WARNING", alert_id=alert_id)
         return {"sent": False, "reason": "alert not found"}
     sev = alert["severity"]
-    kind = "SLACK_AI" if ai_message else f"SLACK#{sev}"
+    kind = f"SLACK_AI#{sev}" if followup else f"SLACK#{sev}"
     marker = {"alert_id": alert_id, "task": kind, "status": "SENT", "generated_at": datetime.now(IST).isoformat(timespec="seconds")}
     if not ddb.put_if_absent("AiSuggestions", marker, "alert_id"):
         return {"sent": False, "reason": "already sent"}
     try:
         portal = config.get_setting("portal_url", "") or None
-        if ai_message:
-            advice = suggestion(alert_id, "CONTAINMENT_ADVICE")
-            for _ in range(ADVICE_TRIES - 1):
-                if advice is not None:
-                    break
-                time.sleep(ADVICE_WAIT_S)
-                advice = suggestion(alert_id, "CONTAINMENT_ADVICE")
-            message = build_ai_message(alert, suggestion(alert_id, "SECOND_OPINION"), advice, portal)
+        if followup:
+            message = build_ai_message(alert, suggestion_for(alert, "SECOND_OPINION"), suggestion_for(alert, "CONTAINMENT_ADVICE"), portal,
+                                       compliance=suggestion_for(alert, "COMPLIANCE_MAP"))
         else:
             message = build_message(alert, detail.get("previous_severity"), portal)
         post(url, message)

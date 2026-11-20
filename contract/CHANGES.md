@@ -92,3 +92,7 @@
 - `ai_suggest/regulations.json` is a copy of `ai_explain/regulations.json` (NOT VERIFIED list). Keep both in step when Arvind replaces it.
 - `slack_notify` runs on `Alert Raised`. Webhook: SSM SecureString `/finshield/dev/slack_webhook_url` (not created by the template;
   unset means Slack is off). Optional `/finshield/dev/portal_url` adds an "Open case" button. Test count in test_template.py 13 -> 14 tables.
+- (follow-up) The Slack AI message is now triggered by `ai_suggest` (async `lambda:InvokeFunction` on slack_notify) after its
+  results are stored, so it always carries second opinion, containment advice and compliance mapping. CRITICAL: after
+  AWAITING_APPROVAL; HIGH/MEDIUM: after Alert Raised tasks. slack_notify no longer listens to `Incident Updated`.
+  Suggestions now store `score`; a changed score (escalation) regenerates them. Slack markers: `SLACK#<sev>`, `SLACK_AI#<sev>`.

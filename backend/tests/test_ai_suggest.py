@@ -94,3 +94,36 @@ def test_unknown_task_and_missing_alert(fn):
     with pytest.raises(ValueError):
         fn.handler({"task": "NOPE", "alert_id": AID})
     assert fn.handler({"task": "SECOND_OPINION", "alert_id": "ALR-X"})[0]["reason"] == "alert not found"
+
+def test_slack_followup_triggered_after_tasks(fn, monkeypatch):
+    calls = []
+    monkeypatch.setenv("SLACK_NOTIFY_FN", "finshield-dev-slack-notify")
+    monkeypatch.setattr(fn, "trigger_slack", lambda alert: calls.append(alert["alert_id"]))
+    def boom(*a, **k):
+        raise bedrock.BedrockUnavailable("down")
+    monkeypatch.setattr(bedrock, "converse", boom)
+    fn.handler({"detail-type": "Alert Raised", "detail": fixture("alert_raised_critical")})
+    assert calls == []  # CRITICAL waits for containment advice
+    fn.handler({"detail-type": "Incident Updated", "detail": {"alert_id": AID, "status": "AWAITING_APPROVAL"}})
+    assert calls == [AID] and stored("CONTAINMENT_ADVICE")  # stored before Slack is asked
+    a = ddb.get_item("Alerts", {"alert_id": AID})
+    a.update(severity="HIGH", score=70)
+    ddb.put_item("Alerts", a)
+    fn.handler({"detail-type": "Alert Raised", "detail": {"alert_id": AID, "severity": "HIGH"}})
+    assert calls == [AID, AID]
+def test_escalated_score_regenerates(fn, monkeypatch):
+    fake = Fake([{"risk_rating": "HIGH", "reasoning": "First.", "missed_considerations": []}, {"risk_rating": "CRITICAL", "reasoning": "Second.", "missed_considerations": []}])
+    monkeypatch.setattr(bedrock, "converse", fake)
+    fn.handler({"task": "SECOND_OPINION", "alert_id": AID})
+    a = ddb.get_item("Alerts", {"alert_id": AID})
+    a["score"] = 100
+    ddb.put_item("Alerts", a)
+    fn.handler({"task": "SECOND_OPINION", "alert_id": AID})
+    assert stored("SECOND_OPINION")["output"]["reasoning"] == "Second." and stored("SECOND_OPINION")["score"] == 100
+def test_trigger_slack_failure_is_swallowed(fn, monkeypatch):
+    monkeypatch.setenv("SLACK_NOTIFY_FN", "nope")
+    class Boom:
+        def invoke(self, **kw):
+            raise RuntimeError("no")
+    monkeypatch.setattr(fn.boto3, "client", lambda *a, **k: Boom())
+    fn.trigger_slack({"alert_id": AID, "severity": "HIGH", "score": 70})  # no exception
