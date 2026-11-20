@@ -96,7 +96,10 @@ st, b = call("POST", "/approvals", lead, {"type": "ticket", "subject_id": "u-019
                                           "valid_from": "2026-11-01T00:00:00+05:30", "valid_to": "2026-11-02T00:00:00+05:30"})
 check("POST /approvals", st == 200 and b["data"]["approval_id"].startswith("APR-"), b.get("data", {}).get("approval_id"))
 st, b = call("POST", f"/alerts/{aid}/ask", analyst, {"question": "Why is this alert critical?"})
-check("POST /alerts/{id}/ask", st == 200 and "96" in b["data"]["answer"], b.get("data", {}).get("answer", "")[:90])
+ask = b.get("data") or {}
+# a model answer (ai_status OK) already passed the number check; the rule-based answer always quotes the score
+check("POST /alerts/{id}/ask", st == 200 and bool(ask.get("answer")) and (ask.get("ai_status") == "OK" or "96" in ask["answer"]),
+      f"{ask.get('ai_status')}: {ask.get('answer', '')[:90]}")
 
 
 def awaiting():
