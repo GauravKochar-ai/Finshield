@@ -129,7 +129,10 @@ def test_stub_logs_and_returns_ok(name, caplog):
     assert out == {"status": "OK", "function": name, "stub": True}
 
 
-def test_http_stub_returns_contract_fixture():
+def test_api_needs_sign_in_and_uses_the_envelope():
+    """api is real now: no JWT claims -> 401 in the {data, error} envelope; unknown route -> 404."""
     out = _load("api").handler({"routeKey": "GET /v1/alerts", "requestContext": {"http": {}}}, None)
     body = json.loads(out["body"])
-    assert out["statusCode"] == 200 and body["error"] is None and body["data"][0]["score"] == 96
+    assert out["statusCode"] == 401 and body["data"] is None and body["error"]["code"] == "UNAUTHORIZED"
+    out = _load("api").handler({"routeKey": "GET /v1/nope", "requestContext": {"http": {}}}, None)
+    assert out["statusCode"] == 404

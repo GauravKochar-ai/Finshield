@@ -193,6 +193,10 @@ def claim_open_alert(cfg, uid, now):
     return ptr["alert_id"], False
 
 
+def public_alert(row):
+    return {k: v for k, v in row.items() if k in schema._schemas()["alert"]["properties"]}
+
+
 def create_alert(cfg, alert_id, uid, res, now):
     item = {"alert_id": alert_id, "user_id": uid, "principal_arn": res["principal_arn"], **_alert_fields(res),
             "status": "OPEN", "detected_at": _iso(now), "window_start": res["window_start"],
@@ -217,7 +221,7 @@ def raise_alert(alert_id, res):
     if cur["score"] > res["score"] or (cur["score"] == res["score"] and len(cur.get("event_ids", [])) >= n_new):
         return None, None  # same score with a smaller or equal window: keep the stored facts
     new = {**cur, **_alert_fields(res)}
-    schema.validate("alert", new)
+    schema.validate("alert", public_alert(new))  # other modules keep internal fields (e.g. approval_token) on the row
     f = _alert_fields(res)
     names = {f"#{k}": k for k in f}
     values = {f":{k}": v for k, v in f.items()}
