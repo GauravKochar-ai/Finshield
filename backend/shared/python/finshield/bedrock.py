@@ -32,8 +32,12 @@ def _client(timeout_s: float):
     return boto3.client("bedrock-runtime", region_name=region(), config=cfg)
 
 
-def converse(system: str, user_text: str, timeout_s: float = 8.0, max_tokens: int = 1200, model_id: str | None = None, client: Any = None) -> dict[str, Any]:
-    """Call Converse. Returns {text, stop_reason, guardrail_intervened, latency_ms, usage}."""
+def converse(system: str, user_text: str, timeout_s: float = 8.0, max_tokens: int = 1200, model_id: str | None = None, client: Any = None,
+             image: tuple[str, bytes] | None = None) -> dict[str, Any]:
+    """Call Converse. Returns {text, stop_reason, guardrail_intervened, latency_ms, usage}.
+
+    image=(format, bytes) adds an image block (format png|jpeg|gif|webp) before the masked text block.
+    """
     model_id = model_id or get_setting("bedrock_model_id")
     guardrail_id = get_setting("guardrail_id")
     guardrail_version = get_setting("guardrail_version", "DRAFT")
@@ -42,12 +46,17 @@ def converse(system: str, user_text: str, timeout_s: float = 8.0, max_tokens: in
     if not guardrail_id or guardrail_id == "NONE":
         raise BedrockUnavailable("guardrail_id not configured; refusing to call Bedrock without a Guardrail")
     bc = client or _client(timeout_s)
+    content: list[dict[str, Any]] = []
+    if image is not None:
+        fmt, data = image
+        content.append({"image": {"format": fmt, "source": {"bytes": data}}})
+    content.append({"text": mask_text(user_text)})
     started = time.monotonic()
     try:
         resp = bc.converse(
             modelId=model_id,
             system=[{"text": system}],
-            messages=[{"role": "user", "content": [{"text": mask_text(user_text)}]}],
+            messages=[{"role": "user", "content": content}],
             inferenceConfig={"temperature": 0, "maxTokens": max_tokens},
             guardrailConfig={"guardrailIdentifier": guardrail_id, "guardrailVersion": guardrail_version, "trace": "enabled"},
         )

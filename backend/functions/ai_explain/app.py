@@ -5,7 +5,7 @@ schema check + numbers check + clause check -> one retry -> else template from t
 Writes alert.ai and alert.ai_status (OK | FALLBACK) and one AI_EXPLAINED evidence entry.
 
 Input: the incident state (needs alert_id). {"force_fallback": true} skips Bedrock (used when the
-state machine's 8 s budget runs out).
+state machine's 25 s budget runs out).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from finshield import bedrock, config, ddb, evidence, schema
 from finshield.log import log
 
 HERE = Path(__file__).resolve().parent
-BUDGET_S = float(os.environ.get("AI_BUDGET_S", "6.0"))  # inside the 8 s Step Functions budget
+BUDGET_S = float(os.environ.get("AI_BUDGET_S", "20"))  # inside the 25 s Step Functions budget
 MIN_ATTEMPT_S = 1.5
 SUMMARY_MAX_WORDS = 80
 SMALL_NUMBER = 100  # numbers up to this may appear freely in text (hours, points, percentages)
@@ -68,12 +68,22 @@ def affected_assets(alert: dict[str, Any]) -> list[str]:
     return assets or ["KYC document store"]
 
 
+def with_units(f: dict[str, Any]) -> dict[str, Any]:
+    """Add code-computed megabytes next to byte counts, so the model never converts units itself."""
+    out = dict(f)
+    for k, v in f.items():
+        if (k == "bytes" or k.endswith("_bytes")) and isinstance(v, (int, float)) and not isinstance(v, bool):
+            mb = round(v / 1_000_000, 1)
+            out[f"{k}_mb"] = int(mb) if mb == int(mb) else mb
+    return out
+
+
 def computed_numbers(alert: dict[str, Any]) -> dict[str, float]:
     """The numbers the AI may use, keyed by fact name. Conflicting keys are also kept as <code>.<key>."""
     out: dict[str, float] = {"score": alert["score"], "customers_affected": alert["customers_affected"]}
     for s in alert.get("signals", []):
         out[f"{s['code']}_points"] = s["points"]
-        for k, v in (s.get("facts") or {}).items():
+        for k, v in with_units(s.get("facts") or {}).items():
             if isinstance(v, bool) or not isinstance(v, (int, float)):
                 continue
             if k in out and out[k] != v:
@@ -93,11 +103,10 @@ def build_facts(alert: dict[str, Any]) -> dict[str, Any]:
         "severity": alert["severity"],
         "customers_affected": alert["customers_affected"],
         "data_classes": alert.get("data_classes", []),
-        "window": {"start": alert.get("window_start"), "detected_at": alert.get("detected_at")},
-        "signals": [{"code": s["code"], "name": signal_names.get(s["code"], s["code"]), "points": s["points"], "facts": _scrub(s.get("facts") or {})} for s in alert.get("signals", [])],
+        "signals": [{"code": s["code"], "name": signal_names.get(s["code"], s["code"]), "points": s["points"], "facts": _scrub(with_units(s.get("facts") or {}))} for s in alert.get("signals", [])],
         "exceptions_applied": alert.get("exceptions_applied", []),
         "affected_assets": affected_assets(alert),
-        "regulations": [{"regulation": r["regulation"], "clause": r["clause"], "summary": r["summary"]} for r in regulations_for(alert)],
+        "regulations": [{"regulation": r["regulation"], "clause": r["clause"]} for r in regulations_for(alert)],  # short prompt for Mistral
     }
 
 
@@ -242,7 +251,7 @@ def ask_bedrock(facts: dict[str, Any], computed: dict[str, float], deadline: flo
             break
         meta["attempts"] += 1
         try:
-            resp = bedrock.converse(SYSTEM, prompt + feedback, timeout_s=remaining)
+            resp = bedrock.converse(SYSTEM, prompt + feedback, timeout_s=remaining, max_tokens=1500)
         except bedrock.BedrockUnavailable as exc:
             meta["reason"] = f"bedrock unavailable: {exc}"[:300]
             break

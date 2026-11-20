@@ -19,7 +19,8 @@ TYPES = ("RBI_INCIDENT", "CERTIN_FORM", "DPB_NOTICE", "CUSTOMER_NOTICE")
 NUM = re.compile(r"\d(?:[\d,]*\d)?(?:\.\d+)?")
 SYSTEM = ("You rewrite a regulatory draft for an Indian digital lender in clear, formal English. Keep every heading. "
           "Use only the numbers already in the draft and add no new ones. Never state that a breach, violation or "
-          "non-compliance has occurred; say 'potential' or 'may require review'. Return only the Markdown.")
+          "non-compliance has occurred; say 'potential' or 'may require review'. Do not number headings or list items; "
+          "keep every date, time and number exactly as written. Return only the Markdown.")
 
 
 def _now():
@@ -57,8 +58,9 @@ def templates(a):
 
 
 def _numbers_ok(text, source):
-    allowed = set(NUM.findall(source))
-    return all(n in allowed for n in NUM.findall(text))
+    """Every number in the model text has the same value as a number in the template (thousand separators ignored)."""
+    allowed = {n.replace(",", "") for n in NUM.findall(source)}
+    return all(n.replace(",", "") in allowed for n in NUM.findall(text))
 
 
 def generate(alert_id, execution=None, use_ai=True):
@@ -71,7 +73,7 @@ def generate(alert_id, execution=None, use_ai=True):
         status, model = "FALLBACK", "template"
         if use_ai:
             try:
-                r = bedrock.converse(SYSTEM, body, timeout_s=12, max_tokens=1500)
+                r = bedrock.converse(SYSTEM, body, timeout_s=25, max_tokens=1500)
                 if not r["guardrail_intervened"] and _numbers_ok(r["text"], body) and r["text"].strip():
                     body, status, model = r["text"].strip(), "DRAFT", r["model_id"]
             except bedrock.BedrockUnavailable as exc:

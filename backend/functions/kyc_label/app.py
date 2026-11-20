@@ -2,19 +2,18 @@
 put a KYC_FILE_UPLOADED event on the bus.
 
 Key pattern kyc/<customer_id>/KYC-<DOC>-<customer_id>.<ext>. The document type comes from the key. With a Bedrock
-model configured, image files are sent to the model (Converse, image block) to read the document type and whether a
+model configured, image files are sent to the model (finshield.bedrock.converse: image block, Guardrail) to read the document type and whether a
 full 12-digit Aadhaar number is visible (unmasked_aadhaar_flag, shown on the Privacy screen). Without Bedrock, or when
 the call fails, the label comes from the key and the flag stays false.
 """
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime
 
 import boto3
 
-from finshield import ddb, events
+from finshield import bedrock, ddb, events
 from finshield.config import get_setting, load_config, region
 from finshield.log import log
 from finshield.scoring import tz_offset
@@ -23,22 +22,30 @@ KEY_RX = re.compile(r"^kyc/(?P<cid>[^/]+)/(?P<name>KYC-(?P<doc>[A-Z_]+)-[^/.]+)\
 IMAGE = {"png": "png", "jpg": "jpeg", "jpeg": "jpeg", "webp": "webp", "gif": "gif"}
 PROMPT = ('This is a SAMPLE Indian KYC document image. Reply only with JSON {"doc_type": "PAN|AADHAAR|SELFIE|ADDRESS|OTHER", '
           '"full_aadhaar_visible": true|false}. full_aadhaar_visible is true only if a complete 12-digit Aadhaar number is readable.')
+SYSTEM = "You classify SAMPLE KYC document images for a privacy check. Never transcribe numbers or names. Reply with JSON only."
 MAX_IMAGE_BYTES = 3_500_000
 
 
-def _vision(bucket, key, ext):
+def s3_client():  # module-level factory so tests can stub it
+    return boto3.client("s3", region_name=region())
+
+
+def _vision(bucket, key, ext, client=None):
+    """Converse through finshield.bedrock (Guardrail, temperature 0). None -> label from the key."""
     model = get_setting("bedrock_model_id", "NONE")
     if not model or model == "NONE" or ext not in IMAGE:
         return None
-    s3 = boto3.client("s3", region_name=region())
-    data = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+    data = s3_client().get_object(Bucket=bucket, Key=key)["Body"].read()
     if len(data) > MAX_IMAGE_BYTES:
         return None
-    r = boto3.client("bedrock-runtime", region_name=region()).converse(
-        modelId=model, inferenceConfig={"temperature": 0, "maxTokens": 100},
-        messages=[{"role": "user", "content": [{"image": {"format": IMAGE[ext], "source": {"bytes": data}}}, {"text": PROMPT}]}])
-    text = "".join(p.get("text", "") for p in r["output"]["message"]["content"])
-    return json.loads(text[text.find("{"): text.rfind("}") + 1])
+    try:
+        r = bedrock.converse(SYSTEM, PROMPT, image=(IMAGE[ext], data), timeout_s=30, max_tokens=100, client=client)
+    except bedrock.BedrockUnavailable as exc:
+        log("bedrock unavailable, label from the key", key=key, reason=str(exc)[:200])
+        return None
+    if r["guardrail_intervened"]:
+        return None
+    return bedrock.extract_json(r["text"])
 
 
 def label(bucket, key, size=None):

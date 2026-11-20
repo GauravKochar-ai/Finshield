@@ -1,4 +1,4 @@
-"""ask: POST /v1/alerts/{id}/ask {"question": "..."} -> {answer, sources} ("Ask FinShield").
+"""ask: POST /v1/alerts/{id}/ask {"question": "..."} -> {answer, sources, ai_status OK|FALLBACK} ("Ask FinShield").
 
 The answer is built from the alert's computed facts and its evidence chain. With a Bedrock model configured the model
 answers in plain words from those facts only (masked, Guardrail on) and is rejected if it uses a number that is not in
@@ -53,7 +53,7 @@ def rule_answer(q, f):
     if not parts:
         parts.append(f"Alert {f['alert_id']}: score {f['score']} ({f['severity']}), status {f['status']}, "
                      f"{f['customers_affected']} customers, signs " + ", ".join(sig) + ".")
-    return {"answer": " ".join(parts), "sources": src}
+    return {"answer": " ".join(parts), "sources": src, "ai_status": "FALLBACK"}
 
 
 def answer(aid, q):
@@ -62,11 +62,12 @@ def answer(aid, q):
         raise HttpError(404, "NOT_FOUND", f"alert {aid} not found")
     f = facts(a)
     try:
-        r = bedrock.converse(SYSTEM, json.dumps({"question": q, "facts": f}, default=str), timeout_s=8, max_tokens=400)
+        r = bedrock.converse(SYSTEM, json.dumps({"question": q, "facts": f}, default=str), timeout_s=20, max_tokens=400)
         out = bedrock.extract_json(r["text"])
         allowed = set(NUM.findall(json.dumps(f, default=str)))
         if isinstance(out.get("answer"), str) and all(n in allowed for n in NUM.findall(out["answer"])):
-            return {"answer": out["answer"], "sources": [s for s in out.get("sources") or [] if isinstance(s, str)][:10]}
+            return {"answer": out["answer"], "sources": [s for s in out.get("sources") or [] if isinstance(s, str)][:10],
+                    "ai_status": "OK"}
     except (bedrock.BedrockUnavailable, ValueError):
         pass
     return rule_answer(q, f)
