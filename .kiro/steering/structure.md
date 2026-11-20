@@ -28,3 +28,5 @@ finshield/
   scripts/               write-env.sh seed.sh scenario.sh smoke.sh
   Makefile
 ```
+
+Put new Lambdas in backend/functions/<name>/ and register them in infra/template.yaml in the same change.

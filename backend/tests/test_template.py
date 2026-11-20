@@ -34,6 +34,10 @@ def _fn_dirs():
     return sorted(p.name for p in FUNCS.iterdir() if (p / "app.py").is_file())
 
 
+def _stub_dirs():
+    return [n for n in _fn_dirs() if "stub.handle(" in (FUNCS / n / "app.py").read_text()]
+
+
 def test_every_function_dir_is_registered_and_vice_versa():
     registered = sorted(v["Properties"]["CodeUri"].rstrip("/").split("/")[-1] for v in FN_RES.values())
     assert registered == _fn_dirs()
@@ -117,11 +121,6 @@ def _load(name):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
-
-
-def _stub_dirs():
-    """Functions whose owner has not replaced the stub yet."""
-    return [n for n in _fn_dirs() if "stub.handle(" in (FUNCS / n / "app.py").read_text()]
 
 
 @pytest.mark.parametrize("name", _stub_dirs())

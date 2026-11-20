@@ -1,0 +1,54 @@
+{
+  "_note": "Starting set ported from the boilerplate (backend/fs/regs.py). NOT VERIFIED. Arvind replaces each entry with text checked against the official source and sets verified=true. Only entries listed here may be cited by the AI.",
+  "refs": {
+    "DPDP-SAFEGUARDS": {
+      "regulation": "DPDP Act 2023 (DPDP-aligned readiness and controls)",
+      "clause": "Sec 8(5)",
+      "summary": "Take reasonable security safeguards to prevent a personal data breach.",
+      "verified": false
+    },
+    "DPDP-BREACH": {
+      "regulation": "DPDP Rules 2025 (DPDP-aligned readiness and controls)",
+      "clause": "Rule 7",
+      "summary": "Intimate the Data Protection Board and affected persons without delay; detailed report within 72 hours.",
+      "verified": false
+    },
+    "DPDP-PURPOSE": {
+      "regulation": "DPDP Act 2023 (DPDP-aligned readiness and controls)",
+      "clause": "Sec 6-7",
+      "summary": "Process personal data only for the purpose the person consented to.",
+      "verified": false
+    },
+    "RBI-CYBER": {
+      "regulation": "RBI IT governance and cyber security directions for NBFCs",
+      "clause": "Privileged access and incident reporting",
+      "summary": "Elevated access is supervised, logged and reviewed; MFA for privileged users; report cyber incidents to RBI within 6 hours.",
+      "verified": false
+    },
+    "RBI-DL": {
+      "regulation": "RBI (Digital Lending) Directions 2025",
+      "clause": "Data use and disbursal",
+      "summary": "Need-based use of borrower data with consent and audit trail; disbursal only into the borrower's own bank account; lender stays responsible for its lending service providers.",
+      "verified": false
+    },
+    "CERTIN": {
+      "regulation": "CERT-In Directions, April 2022",
+      "clause": "Incident reporting and log retention",
+      "summary": "Report cyber incidents to CERT-In within 6 hours; keep ICT logs for 180 days in India.",
+      "verified": false
+    }
+  },
+  "by_signal": {
+    "S1": ["RBI-CYBER", "DPDP-SAFEGUARDS"],
+    "S2": ["RBI-CYBER", "DPDP-SAFEGUARDS"],
+    "S3": ["RBI-CYBER"],
+    "S4": ["DPDP-BREACH", "CERTIN", "RBI-DL"],
+    "S5": ["RBI-CYBER"],
+    "S6": ["RBI-CYBER"],
+    "S7": ["RBI-DL", "DPDP-SAFEGUARDS"],
+    "S8": ["RBI-CYBER", "CERTIN", "DPDP-SAFEGUARDS"],
+    "S9": ["DPDP-PURPOSE", "RBI-DL"],
+    "S10": ["RBI-DL", "RBI-CYBER"],
+    "S11": ["DPDP-SAFEGUARDS", "RBI-CYBER", "CERTIN"]
+  }
+}
