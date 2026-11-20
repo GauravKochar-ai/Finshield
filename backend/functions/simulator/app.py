@@ -6,6 +6,8 @@ POST /v1/simulate {"scenario_id":"SC-01"} or direct invoke with the same payload
   Events go to the bus as Raw Activity in batches of 10.
 {"reset": true} deletes Alerts, Counters and replayed Events for every scenario user
   (or only the given scenario's user when scenario_id is also set). Normal history is kept.
+  An alert with LIVE containment that is not RELEASED is released first (release Lambda), so no deny policy is orphaned.
+{"guardduty_sample": true} asks the region's GuardDuty detector for 3 sample findings (501 when there is none).
 HTTP calls need the Admin group and answer in the {data, error} envelope.
 """
 from __future__ import annotations
@@ -23,6 +25,16 @@ from finshield.config import load_config
 from finshield.ddb import Key
 from finshield.scoring import tz_offset
 from finshield.stub import log_json
+
+
+def lambda_client():  # module-level factories so tests can stub the clients
+    import boto3
+    return boto3.client("lambda")
+
+
+def guardduty_client():
+    import boto3
+    return boto3.client("guardduty")
 
 
 def scenario_dir() -> Path:
@@ -95,11 +107,36 @@ def _delete_all(logical, keys):
     return len(keys)
 
 
+def _live_contained(alert: dict) -> bool:
+    """Not released yet and at least one containment step really ran (LIVE, OK)."""
+    if alert.get("status") == "RELEASED":
+        return False
+    return any(c.get("mode") == "LIVE" and c.get("result") == "OK" for c in alert.get("containment") or [])
+
+
+def _release_before_delete(alert_id: str) -> None:
+    """Undo LIVE containment first: deleting the alert row would orphan the deny policies."""
+    try:
+        resp = lambda_client().invoke(FunctionName=os.environ["RELEASE_FUNCTION_NAME"], InvocationType="RequestResponse",
+                                      Payload=json.dumps({"alert_id": alert_id, "actor": "simulator-reset"}).encode())
+        if resp.get("FunctionError"):
+            log_json("WARNING", "release on reset failed", alert_id=alert_id,
+                     error=resp["Payload"].read().decode("utf-8", "replace")[:300])
+        else:
+            log_json("INFO", "released on reset", alert_id=alert_id)
+    except Exception as exc:  # keep resetting the other users
+        log_json("WARNING", "release on reset failed", alert_id=alert_id, error=str(exc)[:300])
+
+
 def reset(sid: str | None = None) -> dict:
     users = sorted({load_scenario(s)["user_id"] for s in ([sid] if sid else list_scenarios())})
-    counts = {"alerts": 0, "counters": 0, "events": 0}
+    counts = {"alerts": 0, "counters": 0, "events": 0, "released": 0}
     for uid in users:
         alerts = ddb.query("Alerts", Key("user_id").eq(uid), index="user-detected-index")
+        for a in alerts:  # user-detected-index projects ALL, so containment is on the row
+            if _live_contained(a):
+                _release_before_delete(a["alert_id"])
+                counts["released"] += 1
         counts["alerts"] += _delete_all("Alerts", [{"alert_id": a["alert_id"]} for a in alerts])
         for pk in (f"{uid}#15m", f"{uid}#1d", f"{uid}#alert", f"{uid}#score"):
             rows = ddb.query("Counters", Key("pk").eq(pk), ProjectionExpression="pk, bucket_start")
@@ -125,11 +162,29 @@ def _http(status, data=None, code=None, message=None):
     return {"statusCode": status, "headers": {"content-type": "application/json"}, "body": json.dumps(body, default=str)}
 
 
+GUARDDUTY_SAMPLE_TYPES = [
+    "Exfiltration:S3/AnomalousBehavior",
+    "UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS",
+    "CredentialAccess:IAMUser/AnomalousBehavior",
+]
+
+
+def guardduty_sample() -> dict:
+    """Ask GuardDuty for sample findings; they reach the bus as real GuardDuty Finding events."""
+    gd = guardduty_client()
+    ids = gd.list_detectors().get("DetectorIds") or []
+    if not ids:
+        raise NotImplementedError("no GuardDuty detector in this region")
+    gd.create_sample_findings(DetectorId=ids[0], FindingTypes=GUARDDUTY_SAMPLE_TYPES)
+    log_json("INFO", "guardduty sample findings requested", detector_id=ids[0], types=len(GUARDDUTY_SAMPLE_TYPES))
+    return {"accepted": True, "scenario_id": None, "events_sent": len(GUARDDUTY_SAMPLE_TYPES)}
+
+
 def handle(body: dict) -> dict:
     if body.get("reset"):
         return reset(body.get("scenario_id"))
     if body.get("guardduty_sample"):
-        raise NotImplementedError("guardduty_sample is P2 and not built yet")
+        return guardduty_sample()
     sid = body.get("scenario_id")
     if not sid:
         raise ValueError("scenario_id or reset is required")
