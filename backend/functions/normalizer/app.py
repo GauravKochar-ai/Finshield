@@ -133,8 +133,11 @@ def from_signin(detail: dict) -> dict | None:
                   device_id=_device(detail.get("userAgent")))
 
 
+def write_posture(control_id, status, resource_arn, rule, ts, source="config"):
+    ddb.put_item("Posture", {"control_id": control_id, "source": source, "status": status, "resource_arn": resource_arn,
+                             "rule": rule, "last_evaluated": ts})
 def from_guardduty(event: dict) -> dict:
-    """Normalized but not scored (GuardDuty is not in our scoring)."""
+    """Normalized and shown on the posture view as a NON_COMPLIANT control; not scored (no alert)."""
     d = event.get("detail") or {}
     key = (d.get("resource") or {}).get("accessKeyDetails") or {}
     user_id, principal = "svc-aws-guardduty", None
@@ -143,15 +146,14 @@ def from_guardduty(event: dict) -> dict:
         hit = next(((a, i) for a, i in u["by_arn"].items() if a.rsplit("/", 1)[-1] == key["userName"]), None)
         if hit:
             principal, user_id = hit
-    return _blank(event_id=f"gd-{d.get('id')}-{d.get('updatedAt', '')}", ts=to_local(d.get("updatedAt") or event["time"]),
+    ts = to_local(d.get("updatedAt") or event["time"])
+    write_posture(f"guardduty:{d.get('type')}:{d.get('id')}", "NON_COMPLIANT", d.get("arn"), d.get("type"), ts, source="guardduty")
+    return _blank(event_id=f"gd-{d.get('id')}-{d.get('updatedAt', '')}", ts=ts,
                   source="guardduty", user_id=user_id, principal_arn=principal, action="GUARDDUTY_FINDING",
                   resource_arn=d.get("arn"), ip=((d.get("service") or {}).get("action") or {}).get("awsApiCallAction", {})
                   .get("remoteIpDetails", {}).get("ipAddressV4"))
 
 
-def write_posture(control_id, status, resource_arn, rule, ts, source="config"):
-    ddb.put_item("Posture", {"control_id": control_id, "source": source, "status": status, "resource_arn": resource_arn,
-                             "rule": rule, "last_evaluated": ts})
 
 
 def from_config(event: dict) -> dict | None:

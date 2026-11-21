@@ -285,6 +285,8 @@ def test_config_and_guardduty(env):
     assert (ev["action"], ev["user_id"]) == ("GUARDDUTY_FINDING", "u-046")
     r = env["fn"]["detection"].handler({"detail-type": "Normalized Event", "detail": ev})
     assert r["score"] == 0  # normalized but not scored
+    row = ddb.get_item("Posture", {"control_id": "guardduty:UnauthorizedAccess:IAMUser/ConsoleLogin:f1"})
+    assert (row["source"], row["status"]) == ("guardduty", "NON_COMPLIANT")  # shown on the posture view
 
 
 def test_invalid_raw_activity_is_rejected(env):
